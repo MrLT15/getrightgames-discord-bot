@@ -6,9 +6,9 @@ const GUILD_ID = process.env.GUILD_ID;
 
 const ROLE_RULES = [
   {
-    roleId: "PUT_ROLE_ID_HERE",
+    roleId: "Master_Historian",
     templateId: "776806",
-    quantity: 5
+    quantity: 3
   }
 ];
 
