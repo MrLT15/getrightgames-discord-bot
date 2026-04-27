@@ -14,6 +14,7 @@ const CLIENT_ID = process.env.CLIENT_ID;
 
 const ROLE_RULES = [
   {
+    name: "📖 Master_Historian",
     roleId: "1497994442383032461",
     templateId: "776806",
     quantity: 3
@@ -89,25 +90,27 @@ client.on("interactionCreate", async interaction => {
     const member = await interaction.guild.members.fetch(interaction.user.id);
 
     const added = [];
+const qualified = [];
 
-    for (const rule of ROLE_RULES) {
-      const owned = counts[rule.templateId] || 0;
+for (const rule of ROLE_RULES) {
+  const owned = counts[rule.templateId] || 0;
 
-      if (owned >= rule.quantity) {
-        await member.roles.add(rule.roleId);
-        added.push(rule.templateId);
-      }
+  if (owned >= rule.quantity) {
+    qualified.push(`${rule.name}: ${owned}/${rule.quantity}`);
+
+    if (!member.roles.cache.has(rule.roleId)) {
+      await member.roles.add(rule.roleId);
+      added.push(rule.name);
     }
-
-    await interaction.editReply(
-      `Wallet checked: ${wallet}\nRoles updated successfully.`
-    );
-  } catch (error) {
-    console.error(error);
-    await interaction.editReply(
-      "Something went wrong while checking your wallet."
-    );
   }
-});
+}
+
+await interaction.editReply(
+  `✅ Wallet checked: **${wallet}**\n\n` +
+  `**NFT Requirements Met:**\n` +
+  `${qualified.length ? qualified.join("\n") : "None"}\n\n` +
+  `**Roles Added:**\n` +
+  `${added.length ? added.join("\n") : "No new roles added"}`
+);
 
 client.login(TOKEN);
