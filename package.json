@@ -1,0 +1,9 @@
+{
+  "name": "getright-bot",
+  "version": "1.0.0",
+  "main": "index.js",
+  "dependencies": {
+    "discord.js": "^14.11.0",
+    "node-fetch": "^2.6.7"
+  }
+}
