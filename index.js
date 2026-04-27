@@ -1,20 +1,52 @@
-const { Client, GatewayIntentBits } = require("discord.js");
+const {
+  Client,
+  GatewayIntentBits,
+  REST,
+  Routes,
+  SlashCommandBuilder
+} = require("discord.js");
+
 const fetch = require("node-fetch");
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const GUILD_ID = process.env.GUILD_ID;
+const CLIENT_ID = process.env.CLIENT_ID;
 
 const ROLE_RULES = [
   {
-    roleId: "Master_Historian",
+    roleId: "PUT_ROLE_ID_HERE",
     templateId: "776806",
-    quantity: 3
+    quantity: 5
   }
 ];
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers]
 });
+
+async function registerCommands() {
+  const commands = [
+    new SlashCommandBuilder()
+      .setName("verify")
+      .setDescription("Verify your WAX wallet and receive NFT roles.")
+      .addStringOption(option =>
+        option
+          .setName("wallet")
+          .setDescription("Your WAX wallet, example: abcde.wam")
+          .setRequired(true)
+      )
+      .toJSON()
+  ];
+
+  const rest = new REST({ version: "10" }).setToken(TOKEN);
+
+  await rest.put(
+    Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
+    { body: commands }
+  );
+
+  console.log("Slash command /verify registered.");
+}
 
 async function getAssets(wallet) {
   const url = `https://wax.api.atomicassets.io/atomicassets/v1/assets?owner=${wallet}&limit=1000`;
@@ -30,7 +62,6 @@ function countTemplates(assets) {
 
   for (const asset of assets) {
     const templateId = asset.template?.template_id;
-
     if (!templateId) continue;
 
     counts[templateId] = (counts[templateId] || 0) + 1;
@@ -39,29 +70,43 @@ function countTemplates(assets) {
   return counts;
 }
 
+client.once("ready", async () => {
+  console.log(`Logged in as ${client.user.tag}`);
+  await registerCommands();
+});
+
 client.on("interactionCreate", async interaction => {
   if (!interaction.isChatInputCommand()) return;
+  if (interaction.commandName !== "verify") return;
 
-  if (interaction.commandName === "verify") {
-    const wallet = interaction.options.getString("wallet");
+  const wallet = interaction.options.getString("wallet").toLowerCase().trim();
 
+  await interaction.deferReply({ ephemeral: true });
+
+  try {
     const assets = await getAssets(wallet);
     const counts = countTemplates(assets);
-
     const member = await interaction.guild.members.fetch(interaction.user.id);
+
+    const added = [];
 
     for (const rule of ROLE_RULES) {
       const owned = counts[rule.templateId] || 0;
 
       if (owned >= rule.quantity) {
         await member.roles.add(rule.roleId);
+        added.push(rule.templateId);
       }
     }
 
-    await interaction.reply({
-      content: "Wallet verified and roles updated!",
-      ephemeral: true
-    });
+    await interaction.editReply(
+      `Wallet checked: ${wallet}\nRoles updated successfully.`
+    );
+  } catch (error) {
+    console.error(error);
+    await interaction.editReply(
+      "Something went wrong while checking your wallet."
+    );
   }
 });
 
