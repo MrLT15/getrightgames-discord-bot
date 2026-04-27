@@ -18,6 +18,8 @@ const WALLETS_FILE = "./wallets.json";
 const VERIFIED_WALLET_ROLE_ID = "1498390601199255794";
 const LEVEL_FIELDS = ["level", "Level", "tier", "Tier", "lvl", "Lvl"];
 
+let verifiedWallets = {};
+
 const ROLE_RULES = [
   { type: "simple_template", name: "📜 Archive_Keeper", roleId: "1497994063465545890", templateId: "680277", quantity: 1 },
   { type: "simple_template", name: "📚 Lore_Archivist", roleId: "1497994272094290073", templateId: "776806", quantity: 1 },
@@ -62,7 +64,13 @@ function loadWallets() {
 }
 
 function saveWallets(wallets) {
-  fs.writeFileSync(WALLETS_FILE, JSON.stringify(wallets, null, 2));
+  verifiedWallets = wallets;
+
+  try {
+    fs.writeFileSync(WALLETS_FILE, JSON.stringify(wallets, null, 2));
+  } catch (error) {
+    console.error("Failed to save wallets.json:", error);
+  }
 }
 
 async function registerCommands() {
@@ -86,6 +94,11 @@ async function registerCommands() {
     new SlashCommandBuilder()
       .setName("stats")
       .setDescription("Show GetRight Games verified wallet and NFT role stats.")
+      .toJSON(),
+
+    new SlashCommandBuilder()
+      .setName("leaderboard")
+      .setDescription("Show the GetRight Games NFT role leaderboard.")
       .toJSON()
   ];
 
@@ -96,7 +109,7 @@ async function registerCommands() {
     { body: commands }
   );
 
-  console.log("Slash commands /verify, /refresh, and /stats registered.");
+  console.log("Slash commands /verify, /refresh, /stats, and /leaderboard registered.");
 }
 
 async function getAssets(wallet) {
@@ -225,7 +238,7 @@ async function processWalletByMember(guild, member, wallet, saveWallet = false) 
   }
 
   if (saveWallet) {
-    const wallets = loadWallets();
+    const wallets = { ...verifiedWallets };
     wallets[member.id] = wallet;
     saveWallets(wallets);
   }
@@ -272,14 +285,13 @@ async function processWalletByMember(guild, member, wallet, saveWallet = false) 
 async function refreshAllVerifiedWallets() {
   console.log("Starting scheduled wallet refresh...");
 
-  const wallets = loadWallets();
   const guild = await client.guilds.fetch(GUILD_ID);
 
   let checked = 0;
   let failed = 0;
 
-  for (const discordId of Object.keys(wallets)) {
-    const wallet = wallets[discordId];
+  for (const discordId of Object.keys(verifiedWallets)) {
+    const wallet = verifiedWallets[discordId];
 
     try {
       const member = await guild.members.fetch(discordId);
@@ -299,10 +311,9 @@ async function refreshAllVerifiedWallets() {
 async function buildStatsMessage(guild) {
   await guild.members.fetch();
 
-  const wallets = loadWallets();
   const verifiedRole = guild.roles.cache.get(VERIFIED_WALLET_ROLE_ID);
   const verifiedCount = verifiedRole ? verifiedRole.members.size : 0;
-  const savedWalletCount = Object.keys(wallets).length;
+  const savedWalletCount = Object.keys(verifiedWallets).length;
 
   const lines = [];
 
@@ -314,10 +325,16 @@ async function buildStatsMessage(guild) {
 
   lines.push("**NiftyKicks Role Counts**");
 
+  const alreadyListed = new Set();
+
   for (const rule of ROLE_RULES) {
+    if (alreadyListed.has(rule.roleId)) continue;
+
     const role = guild.roles.cache.get(rule.roleId);
     const count = role ? role.members.size : 0;
+
     lines.push(`${rule.name}: ${count}`);
+    alreadyListed.add(rule.roleId);
   }
 
   lines.push("");
@@ -326,8 +343,55 @@ async function buildStatsMessage(guild) {
   return lines.join("\n");
 }
 
+async function buildLeaderboardMessage(guild) {
+  await guild.members.fetch();
+
+  const leaderboardRoles = [
+    { title: "🌟 Neon Genesis Founders", roleId: "1497999187944538264" },
+    { title: "🏭 Industrial Tycoons", roleId: "1497993072481406986" },
+    { title: "👷 Workforce Commanders", roleId: "1497993654164263074" },
+    { title: "🏭 Machine Masters", roleId: "1498386362276253887" },
+    { title: "🔥 Supreme Military Commanders", roleId: "1497997103019069521" },
+    { title: "🧠 Chief Technology Architects", roleId: "1497996511139725383" },
+    { title: "📖 Master Historians", roleId: "1497994442383032461" }
+  ];
+
+  const lines = [];
+
+  lines.push("🏆 **GetRight Games NFT Leaderboard**");
+  lines.push("");
+
+  for (const item of leaderboardRoles) {
+    const role = guild.roles.cache.get(item.roleId);
+    const members = role ? [...role.members.values()] : [];
+
+    lines.push(`**${item.title}: ${members.length}**`);
+
+    if (members.length) {
+      const names = members
+        .slice(0, 10)
+        .map((member, index) => `${index + 1}. ${member.displayName}`)
+        .join("\n");
+
+      lines.push(names);
+    } else {
+      lines.push("_No holders yet_");
+    }
+
+    lines.push("");
+  }
+
+  lines.push("_Leaderboard is based on current Discord NFT roles._");
+
+  return lines.join("\n");
+}
+
 client.once("ready", async () => {
   console.log(`Logged in as ${client.user.tag}`);
+
+  verifiedWallets = loadWallets();
+  console.log(`Loaded ${Object.keys(verifiedWallets).length} saved wallets.`);
+
   await registerCommands();
 
   cron.schedule("0 */6 * * *", async () => {
@@ -335,6 +399,21 @@ client.once("ready", async () => {
   });
 
   console.log("Automatic wallet refresh scheduled every 6 hours.");
+});
+
+client.on("guildMemberAdd", async member => {
+  try {
+    await member.send(
+      `👋 Welcome to **GetRight Games**!\n\n` +
+      `To verify your WAX wallet and unlock NFT-based Discord roles, go to the server and run:\n\n` +
+      `/verify yourwallet.wam\n\n` +
+      `After you verify once, you can use:\n\n` +
+      `/refresh\n\n` +
+      `This will update your roles whenever your NFTs change.`
+    );
+  } catch (error) {
+    console.log(`Could not DM new member ${member.id}. They may have DMs disabled.`);
+  }
 });
 
 client.on("interactionCreate", async interaction => {
@@ -345,6 +424,12 @@ client.on("interactionCreate", async interaction => {
   try {
     if (interaction.commandName === "stats") {
       const message = await buildStatsMessage(interaction.guild);
+      await interaction.editReply(message);
+      return;
+    }
+
+    if (interaction.commandName === "leaderboard") {
+      const message = await buildLeaderboardMessage(interaction.guild);
       await interaction.editReply(message);
       return;
     }
@@ -360,8 +445,7 @@ client.on("interactionCreate", async interaction => {
     }
 
     if (interaction.commandName === "refresh") {
-      const wallets = loadWallets();
-      wallet = wallets[interaction.user.id];
+      wallet = verifiedWallets[interaction.user.id];
 
       if (!wallet) {
         await interaction.editReply(
