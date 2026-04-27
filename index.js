@@ -8,6 +8,7 @@ const {
 
 const fetch = require("node-fetch");
 const fs = require("fs");
+const cron = require("node-cron");
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const GUILD_ID = process.env.GUILD_ID;
@@ -51,7 +52,13 @@ const client = new Client({
 
 function loadWallets() {
   if (!fs.existsSync(WALLETS_FILE)) return {};
-  return JSON.parse(fs.readFileSync(WALLETS_FILE, "utf8"));
+
+  try {
+    return JSON.parse(fs.readFileSync(WALLETS_FILE, "utf8"));
+  } catch (error) {
+    console.error("Failed to read wallets.json:", error);
+    return {};
+  }
 }
 
 function saveWallets(wallets) {
@@ -201,10 +208,9 @@ function selectHighestGroupedRules(qualified) {
   return [...final, ...Object.values(grouped)];
 }
 
-async function processWallet(interaction, wallet, saveWallet) {
+async function processWalletByMember(guild, member, wallet, saveWallet = false) {
   const assets = await getAssets(wallet);
   const counts = countTemplates(assets);
-  const member = await interaction.guild.members.fetch(interaction.user.id);
 
   let verifiedRoleAdded = false;
 
@@ -215,7 +221,7 @@ async function processWallet(interaction, wallet, saveWallet) {
 
   if (saveWallet) {
     const wallets = loadWallets();
-    wallets[interaction.user.id] = wallet;
+    wallets[member.id] = wallet;
     saveWallets(wallets);
   }
 
@@ -258,9 +264,42 @@ async function processWallet(interaction, wallet, saveWallet) {
   };
 }
 
+async function refreshAllVerifiedWallets() {
+  console.log("Starting scheduled wallet refresh...");
+
+  const wallets = loadWallets();
+  const guild = await client.guilds.fetch(GUILD_ID);
+
+  let checked = 0;
+  let failed = 0;
+
+  for (const discordId of Object.keys(wallets)) {
+    const wallet = wallets[discordId];
+
+    try {
+      const member = await guild.members.fetch(discordId);
+      await processWalletByMember(guild, member, wallet, false);
+
+      checked++;
+      console.log(`Refreshed ${wallet} for Discord user ${discordId}`);
+    } catch (error) {
+      failed++;
+      console.error(`Failed to refresh ${wallet} for Discord user ${discordId}:`, error);
+    }
+  }
+
+  console.log(`Scheduled refresh complete. Checked: ${checked}. Failed: ${failed}.`);
+}
+
 client.once("ready", async () => {
   console.log(`Logged in as ${client.user.tag}`);
   await registerCommands();
+
+  cron.schedule("0 */6 * * *", async () => {
+    await refreshAllVerifiedWallets();
+  });
+
+  console.log("Automatic wallet refresh scheduled every 6 hours.");
 });
 
 client.on("interactionCreate", async interaction => {
@@ -295,7 +334,13 @@ client.on("interactionCreate", async interaction => {
 
     if (!wallet) return;
 
-    const result = await processWallet(interaction, wallet, saveWallet);
+    const member = await interaction.guild.members.fetch(interaction.user.id);
+    const result = await processWalletByMember(
+      interaction.guild,
+      member,
+      wallet,
+      saveWallet
+    );
 
     await interaction.editReply(
       `✅ Wallet checked: **${result.wallet}**\n` +
