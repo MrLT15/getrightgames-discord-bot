@@ -14,7 +14,7 @@ const CLIENT_ID = process.env.CLIENT_ID;
 
 const ROLE_RULES = [
   {
-    roleId: "Master_Historian",
+    roleId: "YOUR_MASTER_HISTORIAN_ROLE_ID",
     templateId: "776806",
     quantity: 3
   }
