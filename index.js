@@ -7,11 +7,14 @@ const {
 } = require("discord.js");
 
 const fetch = require("node-fetch");
+const fs = require("fs");
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const GUILD_ID = process.env.GUILD_ID;
 const CLIENT_ID = process.env.CLIENT_ID;
 
+const WALLETS_FILE = "./wallets.json";
+const VERIFIED_WALLET_ROLE_ID = "1498390601199255794";
 const LEVEL_FIELDS = ["level", "Level", "tier", "Tier", "lvl", "Lvl"];
 
 const ROLE_RULES = [
@@ -35,16 +38,25 @@ const ROLE_RULES = [
   { type: "tiered_template", group: "military", name: "⚔️ War_Logistics_Director", roleId: "1497997553747366069", templateId: "711919", minLevel: 3 },
   { type: "tiered_template", group: "military", name: "🔥 Supreme_Military_Commander", roleId: "1497997103019069521", templateId: "711919", minLevel: 4 },
 
-  { type: "machine_set", group: "machines", name: "🔧 Machine_Operator", roleId: "1498385988206989312", templateIds: ["708910","708908","708907","708906"], minLevel: 3 },
-  { type: "machine_set", group: "machines", name: "⚙️ Machine_Specialist", roleId: "1498386192104951828", templateIds: ["708910","708908","708907","708906"], minLevel: 6 },
-  { type: "machine_set", group: "machines", name: "🏭 Machine_Master", roleId: "1498386362276253887", templateIds: ["708910","708908","708907","708906"], minLevel: 9 },
+  { type: "machine_set", group: "machines", name: "🔧 Machine_Operator", roleId: "1498385988206989312", templateIds: ["708910", "708908", "708907", "708906"], minLevel: 3 },
+  { type: "machine_set", group: "machines", name: "⚙️ Machine_Specialist", roleId: "1498386192104951828", templateIds: ["708910", "708908", "708907", "708906"], minLevel: 6 },
+  { type: "machine_set", group: "machines", name: "🏭 Machine_Master", roleId: "1498386362276253887", templateIds: ["708910", "708908", "708907", "708906"], minLevel: 9 },
 
-  { type: "all_templates", name: "🌟 Neon_Genesis_Founder", roleId: "1497999187944538264", templateIds: ["452006","452005","452004","452003","452002"], quantityEach: 1 }
+  { type: "all_templates", name: "🌟 Neon_Genesis_Founder", roleId: "1497999187944538264", templateIds: ["452006", "452005", "452004", "452003", "452002"], quantityEach: 1 }
 ];
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers]
 });
+
+function loadWallets() {
+  if (!fs.existsSync(WALLETS_FILE)) return {};
+  return JSON.parse(fs.readFileSync(WALLETS_FILE, "utf8"));
+}
+
+function saveWallets(wallets) {
+  fs.writeFileSync(WALLETS_FILE, JSON.stringify(wallets, null, 2));
+}
 
 async function registerCommands() {
   const commands = [
@@ -57,6 +69,11 @@ async function registerCommands() {
           .setDescription("Your WAX wallet")
           .setRequired(true)
       )
+      .toJSON(),
+
+    new SlashCommandBuilder()
+      .setName("refresh")
+      .setDescription("Refresh your NFT roles using your last verified wallet.")
       .toJSON()
   ];
 
@@ -67,17 +84,32 @@ async function registerCommands() {
     { body: commands }
   );
 
-  console.log("Slash command /verify registered.");
+  console.log("Slash commands /verify and /refresh registered.");
 }
 
 async function getAssets(wallet) {
-  const url =
-    `https://wax.api.atomicassets.io/atomicassets/v1/assets?owner=${wallet}&limit=1000`;
+  let allAssets = [];
+  let page = 1;
+  const limit = 1000;
 
-  const response = await fetch(url);
-  const json = await response.json();
+  while (true) {
+    const url =
+      `https://wax.api.atomicassets.io/atomicassets/v1/assets` +
+      `?owner=${wallet}` +
+      `&limit=${limit}` +
+      `&page=${page}`;
 
-  return json.data || [];
+    const response = await fetch(url);
+    const json = await response.json();
+
+    const assets = json.data || [];
+    allAssets = allAssets.concat(assets);
+
+    if (assets.length < limit) break;
+    page++;
+  }
+
+  return allAssets;
 }
 
 function getTemplateId(asset) {
@@ -96,9 +128,9 @@ function getAssetLevel(asset) {
     if (!source) continue;
 
     for (const field of LEVEL_FIELDS) {
-      if (source[field] !== undefined) {
-        const lvl = parseInt(source[field]);
-        if (!isNaN(lvl)) return lvl;
+      if (source[field] !== undefined && source[field] !== null) {
+        const lvl = parseInt(source[field], 10);
+        if (!Number.isNaN(lvl)) return lvl;
       }
     }
   }
@@ -169,6 +201,63 @@ function selectHighestGroupedRules(qualified) {
   return [...final, ...Object.values(grouped)];
 }
 
+async function processWallet(interaction, wallet, saveWallet) {
+  const assets = await getAssets(wallet);
+  const counts = countTemplates(assets);
+  const member = await interaction.guild.members.fetch(interaction.user.id);
+
+  let verifiedRoleAdded = false;
+
+  if (!member.roles.cache.has(VERIFIED_WALLET_ROLE_ID)) {
+    await member.roles.add(VERIFIED_WALLET_ROLE_ID);
+    verifiedRoleAdded = true;
+  }
+
+  if (saveWallet) {
+    const wallets = loadWallets();
+    wallets[interaction.user.id] = wallet;
+    saveWallets(wallets);
+  }
+
+  const qualified = ROLE_RULES.filter(rule =>
+    qualifiesForRule(rule, assets, counts)
+  );
+
+  const finalRules = selectHighestGroupedRules(qualified);
+  const finalRoleIds = new Set(finalRules.map(r => r.roleId));
+
+  const added = [];
+  const removed = [];
+
+  for (const rule of finalRules) {
+    if (!member.roles.cache.has(rule.roleId)) {
+      await member.roles.add(rule.roleId);
+      added.push(rule.name);
+    }
+  }
+
+  for (const rule of ROLE_RULES) {
+    if (!rule.group) continue;
+
+    if (
+      member.roles.cache.has(rule.roleId) &&
+      !finalRoleIds.has(rule.roleId)
+    ) {
+      await member.roles.remove(rule.roleId);
+      removed.push(rule.name);
+    }
+  }
+
+  return {
+    wallet,
+    assetsChecked: assets.length,
+    verifiedRoleAdded,
+    qualifiedNames: finalRules.map(r => r.name),
+    added,
+    removed
+  };
+}
+
 client.once("ready", async () => {
   console.log(`Logged in as ${client.user.tag}`);
   await registerCommands();
@@ -176,50 +265,50 @@ client.once("ready", async () => {
 
 client.on("interactionCreate", async interaction => {
   if (!interaction.isChatInputCommand()) return;
-  if (interaction.commandName !== "verify") return;
-
-  const wallet = interaction.options.getString("wallet").toLowerCase();
 
   await interaction.deferReply({ ephemeral: true });
 
   try {
-    const assets = await getAssets(wallet);
-    const counts = countTemplates(assets);
-    const member = await interaction.guild.members.fetch(interaction.user.id);
+    let wallet;
+    let saveWallet = false;
+    let commandNote = "";
 
-    const qualified = ROLE_RULES.filter(rule =>
-      qualifiesForRule(rule, assets, counts)
-    );
-
-    const finalRules = selectHighestGroupedRules(qualified);
-    const finalRoleIds = new Set(finalRules.map(r => r.roleId));
-
-    const added = [];
-    const removed = [];
-
-    for (const rule of finalRules) {
-      if (!member.roles.cache.has(rule.roleId)) {
-        await member.roles.add(rule.roleId);
-        added.push(rule.name);
-      }
+    if (interaction.commandName === "verify") {
+      wallet = interaction.options.getString("wallet").toLowerCase().trim();
+      saveWallet = true;
+      commandNote = "Your wallet has been verified and saved. You can use `/refresh` any time to update your roles.";
     }
 
-    for (const rule of ROLE_RULES) {
-      if (!rule.group) continue;
+    if (interaction.commandName === "refresh") {
+      const wallets = loadWallets();
+      wallet = wallets[interaction.user.id];
 
-      if (
-        member.roles.cache.has(rule.roleId) &&
-        !finalRoleIds.has(rule.roleId)
-      ) {
-        await member.roles.remove(rule.roleId);
-        removed.push(rule.name);
+      if (!wallet) {
+        await interaction.editReply(
+          "No wallet found for you yet. Please run `/verify yourwallet.wam` first."
+        );
+        return;
       }
+
+      commandNote = "Your saved wallet was refreshed.";
     }
+
+    if (!wallet) return;
+
+    const result = await processWallet(interaction, wallet, saveWallet);
 
     await interaction.editReply(
-      `✅ Wallet checked: **${wallet}**\n\n` +
-      `Roles Added:\n${added.length ? added.join("\n") : "None"}\n\n` +
-      `Lower Tier Roles Removed:\n${removed.length ? removed.join("\n") : "None"}`
+      `✅ Wallet checked: **${result.wallet}**\n` +
+      `NFTs scanned: **${result.assetsChecked}**\n\n` +
+      `**Verified Wallet Role:**\n` +
+      `${result.verifiedRoleAdded ? "✅ GRG Verified Wallet added" : "Already verified"}\n\n` +
+      `**NFT Role Requirements Met:**\n` +
+      `${result.qualifiedNames.length ? result.qualifiedNames.join("\n") : "None"}\n\n` +
+      `**Roles Added:**\n` +
+      `${result.added.length ? result.added.join("\n") : "None"}\n\n` +
+      `**Lower Tier Roles Removed:**\n` +
+      `${result.removed.length ? result.removed.join("\n") : "None"}\n\n` +
+      `${commandNote}`
     );
 
   } catch (error) {
