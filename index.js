@@ -50,7 +50,8 @@ async function registerCommands() {
 }
 
 async function getAssets(wallet) {
-  const url = `https://wax.api.atomicassets.io/atomicassets/v1/assets?owner=${wallet}&limit=1000`;
+  const url =
+    `https://wax.api.atomicassets.io/atomicassets/v1/assets?owner=${wallet}&limit=1000`;
 
   const response = await fetch(url);
   const json = await response.json();
@@ -90,27 +91,34 @@ client.on("interactionCreate", async interaction => {
     const member = await interaction.guild.members.fetch(interaction.user.id);
 
     const added = [];
-const qualified = [];
+    const qualified = [];
 
-for (const rule of ROLE_RULES) {
-  const owned = counts[rule.templateId] || 0;
+    for (const rule of ROLE_RULES) {
+      const owned = counts[rule.templateId] || 0;
 
-  if (owned >= rule.quantity) {
-    qualified.push(`${rule.name}: ${owned}/${rule.quantity}`);
+      if (owned >= rule.quantity) {
+        qualified.push(`${rule.name}: ${owned}/${rule.quantity}`);
 
-    if (!member.roles.cache.has(rule.roleId)) {
-      await member.roles.add(rule.roleId);
-      added.push(rule.name);
+        if (!member.roles.cache.has(rule.roleId)) {
+          await member.roles.add(rule.roleId);
+          added.push(rule.name);
+        }
+      }
     }
-  }
-}
 
-await interaction.editReply(
-  `✅ Wallet checked: **${wallet}**\n\n` +
-  `**NFT Requirements Met:**\n` +
-  `${qualified.length ? qualified.join("\n") : "None"}\n\n` +
-  `**Roles Added:**\n` +
-  `${added.length ? added.join("\n") : "No new roles added"}`
-);
+    await interaction.editReply(
+      `✅ Wallet checked: **${wallet}**\n\n` +
+      `**NFT Requirements Met:**\n` +
+      `${qualified.length ? qualified.join("\n") : "None"}\n\n` +
+      `**Roles Added:**\n` +
+      `${added.length ? added.join("\n") : "No new roles added"}`
+    );
+  } catch (error) {
+    console.error(error);
+    await interaction.editReply(
+      "Something went wrong while checking your wallet."
+    );
+  }
+});
 
 client.login(TOKEN);
