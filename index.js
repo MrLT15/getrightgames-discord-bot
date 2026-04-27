@@ -81,6 +81,11 @@ async function registerCommands() {
     new SlashCommandBuilder()
       .setName("refresh")
       .setDescription("Refresh your NFT roles using your last verified wallet.")
+      .toJSON(),
+
+    new SlashCommandBuilder()
+      .setName("stats")
+      .setDescription("Show GetRight Games verified wallet and NFT role stats.")
       .toJSON()
   ];
 
@@ -91,7 +96,7 @@ async function registerCommands() {
     { body: commands }
   );
 
-  console.log("Slash commands /verify and /refresh registered.");
+  console.log("Slash commands /verify, /refresh, and /stats registered.");
 }
 
 async function getAssets(wallet) {
@@ -291,6 +296,36 @@ async function refreshAllVerifiedWallets() {
   console.log(`Scheduled refresh complete. Checked: ${checked}. Failed: ${failed}.`);
 }
 
+async function buildStatsMessage(guild) {
+  await guild.members.fetch();
+
+  const wallets = loadWallets();
+  const verifiedRole = guild.roles.cache.get(VERIFIED_WALLET_ROLE_ID);
+  const verifiedCount = verifiedRole ? verifiedRole.members.size : 0;
+  const savedWalletCount = Object.keys(wallets).length;
+
+  const lines = [];
+
+  lines.push("📊 **GetRight Games Wallet Verification Stats**");
+  lines.push("");
+  lines.push(`✅ **GRG Verified Wallet Role:** ${verifiedCount}`);
+  lines.push(`💾 **Saved Wallets for /refresh:** ${savedWalletCount}`);
+  lines.push("");
+
+  lines.push("**NiftyKicks Role Counts**");
+
+  for (const rule of ROLE_RULES) {
+    const role = guild.roles.cache.get(rule.roleId);
+    const count = role ? role.members.size : 0;
+    lines.push(`${rule.name}: ${count}`);
+  }
+
+  lines.push("");
+  lines.push("_Note: Stats are based on current Discord roles. Scheduled refresh runs every 6 hours._");
+
+  return lines.join("\n");
+}
+
 client.once("ready", async () => {
   console.log(`Logged in as ${client.user.tag}`);
   await registerCommands();
@@ -308,6 +343,12 @@ client.on("interactionCreate", async interaction => {
   await interaction.deferReply({ ephemeral: true });
 
   try {
+    if (interaction.commandName === "stats") {
+      const message = await buildStatsMessage(interaction.guild);
+      await interaction.editReply(message);
+      return;
+    }
+
     let wallet;
     let saveWallet = false;
     let commandNote = "";
@@ -358,7 +399,7 @@ client.on("interactionCreate", async interaction => {
 
   } catch (error) {
     console.error(error);
-    await interaction.editReply("Something went wrong while checking your wallet.");
+    await interaction.editReply("Something went wrong while processing your command.");
   }
 });
 
