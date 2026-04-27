@@ -1,10 +1,13 @@
 {
-  "name": "getright-bot",
-  "version": "1.0.0",
+  "name": "getright-games-verification-bot",
+  "version": "1.1.0",
+  "description": "Discord bot that verifies WAX wallets and assigns NFT roles for GetRight Games.",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
+  "author": "GetRight Games",
+  "license": "MIT",
   "dependencies": {
     "discord.js": "^14.16.3",
     "node-fetch": "^2.6.7",
