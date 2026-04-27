@@ -309,8 +309,6 @@ async function refreshAllVerifiedWallets() {
 }
 
 async function buildStatsMessage(guild) {
-  await guild.members.fetch();
-
   const verifiedRole = guild.roles.cache.get(VERIFIED_WALLET_ROLE_ID);
   const verifiedCount = verifiedRole ? verifiedRole.members.size : 0;
   const savedWalletCount = Object.keys(verifiedWallets).length;
@@ -338,14 +336,12 @@ async function buildStatsMessage(guild) {
   }
 
   lines.push("");
-  lines.push("_Note: Stats are based on current Discord roles. Scheduled refresh runs every 6 hours._");
+  lines.push("_Note: Stats are based on currently cached Discord role data. Scheduled refresh runs every 6 hours._");
 
   return lines.join("\n");
 }
 
 async function buildLeaderboardMessage(guild) {
-  await guild.members.fetch();
-
   const leaderboardRoles = [
     { title: "🌟 Neon Genesis Founders", roleId: "1497999187944538264" },
     { title: "🏭 Industrial Tycoons", roleId: "1497993072481406986" },
@@ -381,7 +377,7 @@ async function buildLeaderboardMessage(guild) {
     lines.push("");
   }
 
-  lines.push("_Leaderboard is based on current Discord NFT roles._");
+  lines.push("_Leaderboard is based on currently cached Discord role data._");
 
   return lines.join("\n");
 }
