@@ -23,7 +23,7 @@ const WAX_CHAIN_API = "https://wax.greymass.com";
 const WAX_HISTORY_API = "https://api.waxsweden.org";
 
 const CONTRACT_ACCOUNTS = ["niftykickgam", "niftykicksgm", "niftykickgme"];
-const CONVOY_CONTRACTS = ["niftykickgam", "niftykicksgm", "niftykickgme"];
+const CONVOY_CONTRACTS = ["niftykickgam"];
 const CONVOY_ACTIONS = ["sendconvoy"];
 
 const LEVEL_FIELDS = ["level", "Level", "tier", "Tier", "lvl", "Lvl"];
