@@ -7,14 +7,14 @@ const {
 } = require("discord.js");
 
 const fetch = require("node-fetch");
-const fs = require("fs");
 const cron = require("node-cron");
+const { Pool } = require("pg");
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const GUILD_ID = process.env.GUILD_ID;
 const CLIENT_ID = process.env.CLIENT_ID;
+const DATABASE_URL = process.env.DATABASE_URL;
 
-const WALLETS_FILE = "./wallets.json";
 const VERIFIED_WALLET_ROLE_ID = "1498390601199255794";
 const LEADERBOARD_CHANNEL_ID = "1498090264734990497";
 const GENERAL_CHAT_CHANNEL_ID = "872930746451513436";
@@ -22,18 +22,8 @@ const GENERAL_CHAT_CHANNEL_ID = "872930746451513436";
 const WAX_CHAIN_API = "https://wax.greymass.com";
 const WAX_HISTORY_API = "https://api.waxsweden.org";
 
-const CONTRACT_ACCOUNTS = [
-  "niftykickgam",
-  "niftykicksgm",
-  "niftykickgme"
-];
-
-const CONVOY_CONTRACTS = [
-  "niftykickgam",
-  "niftykicksgm",
-  "niftykickgme"
-];
-
+const CONTRACT_ACCOUNTS = ["niftykickgam", "niftykicksgm", "niftykickgme"];
+const CONVOY_CONTRACTS = ["niftykickgam", "niftykicksgm", "niftykickgme"];
 const CONVOY_ACTIONS = ["sendconvoy"];
 
 const LEVEL_FIELDS = ["level", "Level", "tier", "Tier", "lvl", "Lvl"];
@@ -42,6 +32,11 @@ let verifiedWallets = {};
 let scheduledRefreshRunning = false;
 let seenConvoyActionIds = new Set();
 let convoyTrackerInitialized = false;
+
+const pool = new Pool({
+  connectionString: DATABASE_URL,
+  ssl: DATABASE_URL ? { rejectUnauthorized: false } : false
+});
 
 const ROLE_RULES = [
   { type: "simple_template", name: "📜 Archive_Keeper", roleId: "1497994063465545890", templateId: "680277", quantity: 1 },
@@ -118,23 +113,43 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function loadWallets() {
-  if (!fs.existsSync(WALLETS_FILE)) return {};
-  try {
-    return JSON.parse(fs.readFileSync(WALLETS_FILE, "utf8"));
-  } catch (error) {
-    console.error("Failed to read wallets.json:", error);
-    return {};
+async function initDatabase() {
+  if (!DATABASE_URL) {
+    throw new Error("DATABASE_URL is missing. Add your Render Postgres Internal Database URL as an environment variable.");
   }
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS verified_wallets (
+      discord_id TEXT PRIMARY KEY,
+      wallet TEXT NOT NULL,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
 }
 
-function saveWallets(wallets) {
-  verifiedWallets = wallets;
-  try {
-    fs.writeFileSync(WALLETS_FILE, JSON.stringify(wallets, null, 2));
-  } catch (error) {
-    console.error("Failed to save wallets.json:", error);
+async function loadWalletsFromDatabase() {
+  const result = await pool.query("SELECT discord_id, wallet FROM verified_wallets");
+  const wallets = {};
+
+  for (const row of result.rows) {
+    wallets[row.discord_id] = row.wallet;
   }
+
+  return wallets;
+}
+
+async function saveWalletToDatabase(discordId, wallet) {
+  await pool.query(
+    `
+    INSERT INTO verified_wallets (discord_id, wallet, updated_at)
+    VALUES ($1, $2, NOW())
+    ON CONFLICT (discord_id)
+    DO UPDATE SET wallet = EXCLUDED.wallet, updated_at = NOW();
+    `,
+    [discordId, wallet]
+  );
+
+  verifiedWallets[discordId] = wallet;
 }
 
 async function registerCommands() {
@@ -537,10 +552,6 @@ function buildProfileStats(assets, counts) {
   return {
     factoryTier9: countAssetsByTemplateMinLevel(assets, "708905", 9),
     machinesTier9Complete: hasMachineSetAtLevel(assets, 9),
-    pressingTier9: countAssetsByTemplateMinLevel(assets, "708910", 9),
-    rubberTier9: countAssetsByTemplateMinLevel(assets, "708908", 9),
-    sewingTier9: countAssetsByTemplateMinLevel(assets, "708907", 9),
-    leatherTier9: countAssetsByTemplateMinLevel(assets, "708906", 9),
     skillLaborerTier9: countAssetsByTemplateMinLevel(assets, "708902", 9),
     techCenterTier3: countAssetsByTemplateMinLevel(assets, "768499", 3),
     militaryTier4: countAssetsByTemplateMinLevel(assets, "711919", 4),
@@ -621,9 +632,7 @@ async function processWalletByMember(guild, member, wallet, saveWallet = false, 
   }
 
   if (saveWallet) {
-    const wallets = { ...verifiedWallets };
-    wallets[member.id] = wallet;
-    saveWallets(wallets);
+    await saveWalletToDatabase(member.id, wallet);
   }
 
   const qualified = ROLE_RULES.filter(rule =>
@@ -646,8 +655,6 @@ async function processWalletByMember(guild, member, wallet, saveWallet = false, 
   }
 
   for (const rule of ROLE_RULES) {
-    if (!rule.group) continue;
-
     if (
       member.roles.cache.has(rule.roleId) &&
       !finalRoleIds.has(rule.roleId)
@@ -735,7 +742,7 @@ async function buildStatsMessage(guild) {
   }
 
   lines.push("");
-  lines.push("_Note: Stats are based on currently cached Discord role data. Scheduled refresh runs every 6 hours._");
+  lines.push("_Note: Stats are based on currently cached Discord role data. Scheduled refresh runs every 1 hour._");
 
   return lines.join("\n");
 }
@@ -852,31 +859,20 @@ async function fetchRecentConvoyActions() {
 }
 
 async function postConvoyActivity(contract, actionName, action) {
-
   const guild = await client.guilds.fetch(GUILD_ID);
   const channel = guild.channels.cache.get(GENERAL_CHAT_CHANNEL_ID);
 
   if (!channel) return;
 
   const wallet =
-    action.act?.data?.user ||
-    action.act?.data?.owner ||
-    action.act?.data?.account ||
-    action.act?.data?.player ||
-    "Unknown";
+    getActionDataValue(action, ["user", "owner", "account", "player", "wallet", "from", "to"]) || "Unknown";
 
   const route =
-    action.act?.data?.route ||
-    action.act?.data?.route_id ||
-    action.act?.data?.mission ||
-    "Unknown";
+    getActionDataValue(action, ["route", "route_id", "routeid", "mission", "mission_id", "missionid"]) || "Unknown";
 
   const convoy =
-    action.act?.data?.convoy_id ||
-    action.act?.data?.convoy ||
-    "Unknown";
+    getActionDataValue(action, ["convoy_id", "convoyid", "convoy", "id"]) || "Unknown";
 
-  // Find Discord user if wallet is verified
   let discordUser = null;
 
   for (const [discordId, savedWallet] of Object.entries(verifiedWallets)) {
@@ -886,18 +882,13 @@ async function postConvoyActivity(contract, actionName, action) {
     }
   }
 
-  const playerDisplay = discordUser
-    ? `${wallet} (${discordUser})`
-    : wallet;
+  const playerDisplay = discordUser ? `${wallet} (${discordUser})` : wallet;
 
-  // Route-based convoy emoji
   let convoyEmoji = "🚚";
-
   if (route == 2) convoyEmoji = "🚛";
   if (route == 3) convoyEmoji = "🛻";
   if (route == 4) convoyEmoji = "🚀";
 
-  // Random flavor messages
   const messages = [
     "Good luck on the route!",
     "Engines roaring — another convoy begins its journey.",
@@ -920,7 +911,6 @@ async function postConvoyActivity(contract, actionName, action) {
     `Convoy ID: **${convoy}**\n\n` +
     `${randomMessage}`
   );
-
 }
 
 async function checkConvoyActivity() {
@@ -960,16 +950,17 @@ async function checkConvoyActivity() {
 client.once("clientReady", async () => {
   console.log(`Logged in as ${client.user.tag}`);
 
-  verifiedWallets = loadWallets();
-  console.log(`Loaded ${Object.keys(verifiedWallets).length} saved wallets.`);
+  await initDatabase();
+  verifiedWallets = await loadWalletsFromDatabase();
+  console.log(`Loaded ${Object.keys(verifiedWallets).length} saved wallets from database.`);
 
   await registerCommands();
 
-  cron.schedule("0 */6 * * *", async () => {
+  cron.schedule("0 * * * *", async () => {
     await refreshAllVerifiedWallets();
   });
 
-  console.log("Automatic wallet refresh scheduled every 6 hours.");
+  console.log("Automatic wallet refresh scheduled every 1 hour.");
 
   cron.schedule("0 9 * * *", async () => {
     await postDailyLeaderboard();
@@ -1103,7 +1094,7 @@ client.on("interactionCreate", async interaction => {
       `${result.qualifiedNames.length ? result.qualifiedNames.join("\n") : "None"}\n\n` +
       `**Roles Added:**\n` +
       `${result.added.length ? result.added.join("\n") : "None"}\n\n` +
-      `**Lower Tier Roles Removed:**\n` +
+      `**Roles Removed:**\n` +
       `${result.removed.length ? result.removed.join("\n") : "None"}\n\n` +
       `${commandNote}`
     );
