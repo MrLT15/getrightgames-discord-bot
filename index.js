@@ -20,7 +20,7 @@ const LEADERBOARD_CHANNEL_ID = "1498090264734990497";
 const GENERAL_CHAT_CHANNEL_ID = "872930746451513436";
 
 const WAX_CHAIN_API = "https://wax.greymass.com";
-const WAX_HISTORY_API = "https://wax.greymass.com";
+const WAX_HISTORY_API = "https://api.waxsweden.org";
 
 const CONTRACT_ACCOUNTS = [
   "niftykickgam",
@@ -39,7 +39,10 @@ const CONVOY_ACTIONS = [
   "claimconvoy",
   "signtcnvoy",
   "mountcnvoy",
-  "unmntcnvoy"
+  "unmntcnvoy",
+  "addcrates",
+  "addvehicle",
+  "editcnvoy"
 ];
 
 const LEVEL_FIELDS = ["level", "Level", "tier", "Tier", "lvl", "Lvl"];
@@ -853,6 +856,31 @@ function getActionId(action) {
   );
 }
 
+function getActionDataValue(action, keys) {
+  const data = action.act?.data || {};
+  for (const key of keys) {
+    if (data[key] !== undefined && data[key] !== null) return data[key];
+  }
+  return null;
+}
+
+function formatConvoyExtraDetails(action) {
+  const route =
+    getActionDataValue(action, ["route", "route_id", "routeid", "mission", "mission_id", "missionid"]);
+  const convoy =
+    getActionDataValue(action, ["convoy_id", "convoyid", "convoy", "id"]);
+  const crates =
+    getActionDataValue(action, ["crates", "crate_count", "cratecount", "amount", "quantity"]);
+
+  const details = [];
+
+  if (route !== null) details.push(`Route/Mission: **${route}**`);
+  if (convoy !== null) details.push(`Convoy ID: **${convoy}**`);
+  if (crates !== null) details.push(`Crates/Quantity: **${crates}**`);
+
+  return details.length ? details.join("\n") + "\n" : "";
+}
+
 async function fetchRecentConvoyActions() {
   const foundActions = [];
 
@@ -899,14 +927,22 @@ async function postConvoyActivity(contract, actionName, action) {
 
   const wallet = getActionWallet(action);
   const tx = action.trx_id || "unknown";
+  const extraDetails = formatConvoyExtraDetails(action);
 
-  if (actionName === "sendconvoy" || actionName === "signtcnvoy" || actionName === "mountcnvoy") {
+  if (
+    actionName === "sendconvoy" ||
+    actionName === "signtcnvoy" ||
+    actionName === "mountcnvoy" ||
+    actionName === "addcrates" ||
+    actionName === "addvehicle" ||
+    actionName === "editcnvoy"
+  ) {
     await channel.send(
-      "🚚 **Convoy Dispatched!**\n\n" +
+      "🚚 **Convoy Activity Detected!**\n\n" +
       `Wallet: **${wallet}**\n` +
-      `Contract: \`${contract}\`\n` +
-      `Action: \`${actionName}\`\n\n` +
-      "A new convoy has departed the factory. Good luck on the route!\n\n" +
+      `Action: \`${actionName}\`\n` +
+      `${extraDetails}` +
+      "\nA convoy was prepared, equipped, or dispatched inside NiftyKicks Factory.\n\n" +
       `TX: \`${tx}\``
     );
     return;
@@ -916,9 +952,9 @@ async function postConvoyActivity(contract, actionName, action) {
     await channel.send(
       "📦 **Convoy Successfully Delivered!**\n\n" +
       `Wallet: **${wallet}**\n` +
-      `Contract: \`${contract}\`\n` +
-      `Action: \`${actionName}\`\n\n` +
-      "Rewards have been claimed from the convoy mission. The factory keeps growing!\n\n" +
+      `Action: \`${actionName}\`\n` +
+      `${extraDetails}` +
+      "\nRewards have been claimed from the convoy mission. The factory keeps growing!\n\n" +
       `TX: \`${tx}\``
     );
   }
@@ -958,7 +994,7 @@ async function checkConvoyActivity() {
   }
 }
 
-client.once("ready", async () => {
+client.once("clientReady", async () => {
   console.log(`Logged in as ${client.user.tag}`);
 
   verifiedWallets = loadWallets();
@@ -1005,7 +1041,12 @@ client.on("guildMemberAdd", async member => {
 client.on("interactionCreate", async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
-  await interaction.deferReply({ flags: 64 });
+  try {
+    await interaction.deferReply({ flags: 64 });
+  } catch (error) {
+    console.log("Could not defer interaction. It may have expired.");
+    return;
+  }
 
   try {
     if (interaction.commandName === "stats") {
@@ -1108,7 +1149,11 @@ client.on("interactionCreate", async interaction => {
 
   } catch (error) {
     console.error(error);
-    await interaction.editReply("Something went wrong while processing your command.");
+    try {
+      await interaction.editReply("Something went wrong while processing your command.");
+    } catch {
+      console.log("Could not send error reply to interaction.");
+    }
   }
 });
 
