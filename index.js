@@ -16,6 +16,15 @@ const CLIENT_ID = process.env.CLIENT_ID;
 
 const WALLETS_FILE = "./wallets.json";
 const VERIFIED_WALLET_ROLE_ID = "1498390601199255794";
+
+const WAX_CHAIN_API = "https://wax.greymass.com";
+
+const CONTRACT_ACCOUNTS = [
+  "niftykickgam",
+  "niftykicksgm",
+  "niftykickgme"
+];
+
 const LEVEL_FIELDS = ["level", "Level", "tier", "Tier", "lvl", "Lvl"];
 
 let verifiedWallets = {};
@@ -137,8 +146,221 @@ async function getAssets(wallet) {
   return allAssets;
 }
 
+async function getTableRows({ code, table, lowerBound = null, upperBound = null, useOwnerIndex = false }) {
+  const rows = [];
+  let more = true;
+  let nextKey = lowerBound;
+  const limit = 1000;
+
+  while (more) {
+    const body = {
+      json: true,
+      code,
+      scope: code,
+      table,
+      limit
+    };
+
+    if (useOwnerIndex) {
+      body.index_position = "2";
+      body.key_type = "i64";
+    }
+
+    if (nextKey) {
+      body.lower_bound = nextKey;
+    }
+
+    if (upperBound) {
+      body.upper_bound = upperBound;
+    }
+
+    try {
+      const response = await fetch(`${WAX_CHAIN_API}/v1/chain/get_table_rows`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+
+      const json = await response.json();
+
+      if (!response.ok || json.error) {
+        console.log(`Skipping table ${code}.${table}:`, json.error?.what || json.message || "Unknown table error");
+        break;
+      }
+
+      rows.push(...(json.rows || []));
+
+      more = Boolean(json.more);
+
+      if (!more) break;
+
+      nextKey = json.next_key || json.next_key === "" ? json.next_key : null;
+
+      if (!nextKey) break;
+    } catch (error) {
+      console.log(`Failed to read table ${code}.${table}:`, error.message);
+      break;
+    }
+  }
+
+  return rows;
+}
+
+async function getRowsByOwner(code, table, wallet) {
+  const rows = await getTableRows({
+    code,
+    table,
+    lowerBound: wallet,
+    upperBound: wallet,
+    useOwnerIndex: true
+  });
+
+  return rows.filter(row => row.owner === wallet || row.account === wallet);
+}
+
+async function getRowsByPrimaryAccount(code, table, wallet) {
+  const rows = await getTableRows({
+    code,
+    table,
+    lowerBound: wallet,
+    upperBound: wallet,
+    useOwnerIndex: false
+  });
+
+  return rows.filter(row => row.owner === wallet || row.account === wallet);
+}
+
+function makePseudoAsset({ templateId, tier = 0, assetId = null, source = "staked" }) {
+  return {
+    asset_id: assetId ? String(assetId) : `${source}-${templateId}-${Math.random()}`,
+    template: { template_id: String(templateId) },
+    mutable_data: { tier },
+    data: { tier },
+    source
+  };
+}
+
+async function getStakedAssets(wallet) {
+  const stakedAssets = [];
+
+  for (const contract of CONTRACT_ACCOUNTS) {
+    const factories = await getRowsByOwner(contract, "factories", wallet);
+    for (const row of factories) {
+      stakedAssets.push(makePseudoAsset({
+        templateId: row.template_id || "708905",
+        tier: row.tier || 0,
+        assetId: row.asset_id,
+        source: `${contract}:factories`
+      }));
+    }
+
+    const machines = await getRowsByOwner(contract, "machines", wallet);
+    for (const row of machines) {
+      stakedAssets.push(makePseudoAsset({
+        templateId: row.template_id,
+        tier: row.tier || 0,
+        assetId: row.asset_id,
+        source: `${contract}:machines`
+      }));
+    }
+
+    const labourers = await getRowsByOwner(contract, "labourers", wallet);
+    for (const row of labourers) {
+      stakedAssets.push(makePseudoAsset({
+        templateId: row.template_id || "708902",
+        tier: row.tier || 0,
+        assetId: row.asset_id,
+        source: `${contract}:labourers`
+      }));
+    }
+
+    const techCenters = await getRowsByOwner(contract, "techcenter", wallet);
+    for (const row of techCenters) {
+      stakedAssets.push(makePseudoAsset({
+        templateId: "768499",
+        tier: row.tier || 0,
+        assetId: row.asset_id,
+        source: `${contract}:techcenter`
+      }));
+    }
+
+    const museums = await getRowsByOwner(contract, "kickmuseum", wallet);
+    for (const row of museums) {
+      stakedAssets.push(makePseudoAsset({
+        templateId: "KICK_MUSEUM",
+        tier: row.tier || 0,
+        assetId: row.asset_id,
+        source: `${contract}:kickmuseum`
+      }));
+    }
+
+    const chronicles = await getRowsByOwner(contract, "chronicles", wallet);
+    for (const row of chronicles) {
+      stakedAssets.push(makePseudoAsset({
+        templateId: row.chronicle_template_id,
+        tier: 0,
+        assetId: row.asset_id,
+        source: `${contract}:chronicles`
+      }));
+    }
+
+    const userMilitary = await getRowsByPrimaryAccount(contract, "usermilitary", wallet);
+    for (const row of userMilitary) {
+      const data = row.data_tier_quantity || [];
+
+      for (const militaryTier of data) {
+        const tier = militaryTier.tier || 0;
+        const quantity = militaryTier.quantity || 0;
+
+        for (let i = 0; i < quantity; i++) {
+          stakedAssets.push(makePseudoAsset({
+            templateId: "711919",
+            tier,
+            assetId: `${contract}-military-${wallet}-${tier}-${i}`,
+            source: `${contract}:usermilitary`
+          }));
+        }
+      }
+    }
+  }
+
+  return dedupeAssets(stakedAssets);
+}
+
+function dedupeAssets(assets) {
+  const seen = new Set();
+  const unique = [];
+
+  for (const asset of assets) {
+    const key = String(asset.asset_id || "");
+
+    if (!key) {
+      unique.push(asset);
+      continue;
+    }
+
+    if (seen.has(key)) continue;
+
+    seen.add(key);
+    unique.push(asset);
+  }
+
+  return unique;
+}
+
+async function getAllRoleAssets(wallet) {
+  const walletAssets = await getAssets(wallet);
+  const stakedAssets = await getStakedAssets(wallet);
+
+  return {
+    walletAssets,
+    stakedAssets,
+    combinedAssets: dedupeAssets([...walletAssets, ...stakedAssets])
+  };
+}
+
 function getTemplateId(asset) {
-  return String(asset.template?.template_id || "");
+  return String(asset.template?.template_id || asset.template_id || "");
 }
 
 function getAssetLevel(asset) {
@@ -146,7 +368,8 @@ function getAssetLevel(asset) {
     asset.mutable_data,
     asset.immutable_data,
     asset.data,
-    asset.template?.immutable_data
+    asset.template?.immutable_data,
+    asset
   ];
 
   for (const source of sources) {
@@ -227,7 +450,8 @@ function selectHighestGroupedRules(qualified) {
 }
 
 async function processWalletByMember(guild, member, wallet, saveWallet = false) {
-  const assets = await getAssets(wallet);
+  const assetData = await getAllRoleAssets(wallet);
+  const assets = assetData.combinedAssets;
   const counts = countTemplates(assets);
 
   let verifiedRoleAdded = false;
@@ -274,6 +498,8 @@ async function processWalletByMember(guild, member, wallet, saveWallet = false) 
 
   return {
     wallet,
+    walletAssetsChecked: assetData.walletAssets.length,
+    stakedAssetsChecked: assetData.stakedAssets.length,
     assetsChecked: assets.length,
     verifiedRoleAdded,
     qualifiedNames: finalRules.map(r => r.name),
@@ -465,7 +691,9 @@ client.on("interactionCreate", async interaction => {
 
     await interaction.editReply(
       `✅ Wallet checked: **${result.wallet}**\n` +
-      `NFTs scanned: **${result.assetsChecked}**\n\n` +
+      `Wallet NFTs scanned: **${result.walletAssetsChecked}**\n` +
+      `Staked NFTs detected: **${result.stakedAssetsChecked}**\n` +
+      `Total NFTs evaluated: **${result.assetsChecked}**\n\n` +
       `**Verified Wallet Role:**\n` +
       `${result.verifiedRoleAdded ? "✅ GRG Verified Wallet added" : "Already verified"}\n\n` +
       `**NFT Role Requirements Met:**\n` +
