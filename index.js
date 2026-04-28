@@ -29,6 +29,7 @@ const CONTRACT_ACCOUNTS = [
 const LEVEL_FIELDS = ["level", "Level", "tier", "Tier", "lvl", "Lvl"];
 
 let verifiedWallets = {};
+let scheduledRefreshRunning = false;
 
 const ROLE_RULES = [
   { type: "simple_template", name: "📜 Archive_Keeper", roleId: "1497994063465545890", templateId: "680277", quantity: 1 },
@@ -102,6 +103,10 @@ const MILESTONE_ROLES = {
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers]
 });
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 function loadWallets() {
   if (!fs.existsSync(WALLETS_FILE)) return {};
@@ -625,6 +630,12 @@ async function processWalletByMember(guild, member, wallet, saveWallet = false, 
 }
 
 async function refreshAllVerifiedWallets() {
+  if (scheduledRefreshRunning) {
+    console.log("Scheduled refresh already running. Skipping duplicate run.");
+    return;
+  }
+
+  scheduledRefreshRunning = true;
   console.log("Starting scheduled wallet refresh...");
 
   const guild = await client.guilds.fetch(GUILD_ID);
@@ -641,12 +652,15 @@ async function refreshAllVerifiedWallets() {
 
       checked++;
       console.log(`Refreshed ${wallet} for Discord user ${discordId}`);
+
+      await sleep(1500);
     } catch (error) {
       failed++;
       console.error(`Failed to refresh ${wallet} for Discord user ${discordId}:`, error);
     }
   }
 
+  scheduledRefreshRunning = false;
   console.log(`Scheduled refresh complete. Checked: ${checked}. Failed: ${failed}.`);
 }
 
@@ -791,7 +805,7 @@ client.on("guildMemberAdd", async member => {
 client.on("interactionCreate", async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: 64 });
 
   try {
     if (interaction.commandName === "stats") {
