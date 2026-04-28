@@ -726,6 +726,30 @@ async function buildLeaderboardMessage(guild) {
   return lines.join("\n");
 }
 
+async function postDailyLeaderboard() {
+  try {
+    const guild = await client.guilds.fetch(GUILD_ID);
+    const channel = guild.channels.cache.get(LEADERBOARD_CHANNEL_ID);
+
+    if (!channel) {
+      console.log("Leaderboard channel not found for daily post.");
+      return;
+    }
+
+    const message = await buildLeaderboardMessage(guild);
+
+    await channel.send(
+      "🏆 **Daily NiftyKicks Factory Prestige Board** 🏆\n\n" +
+      message +
+      "\n\nUse `/verify wallet.wam` to claim your roles.\nUse `/leaderboard` anytime to view the current board."
+    );
+
+    console.log("Daily leaderboard posted.");
+  } catch (error) {
+    console.error("Failed to post daily leaderboard:", error);
+  }
+}
+
 client.once("ready", async () => {
   console.log(`Logged in as ${client.user.tag}`);
 
@@ -739,6 +763,14 @@ client.once("ready", async () => {
   });
 
   console.log("Automatic wallet refresh scheduled every 6 hours.");
+
+  cron.schedule("0 9 * * *", async () => {
+    await postDailyLeaderboard();
+  }, {
+    timezone: "America/Los_Angeles"
+  });
+
+  console.log("Daily leaderboard post scheduled for 9:00 AM Pacific.");
 });
 
 client.on("guildMemberAdd", async member => {
