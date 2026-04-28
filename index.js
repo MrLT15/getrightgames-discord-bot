@@ -34,7 +34,14 @@ const CONVOY_CONTRACTS = [
   "niftykickgme"
 ];
 
-const CONVOY_ACTIONS = ["sendconvoy", "claimconvoy"];
+const CONVOY_ACTIONS = [
+  "sendconvoy",
+  "claimconvoy",
+  "signtcnvoy",
+  "mountcnvoy",
+  "unmntcnvoy"
+];
+
 const LEVEL_FIELDS = ["level", "Level", "tier", "Tier", "lvl", "Lvl"];
 
 let verifiedWallets = {};
@@ -68,9 +75,7 @@ const ROLE_RULES = [
   { type: "machine_set", group: "machines", name: "🏭 Machine_Master", roleId: "1498386362276253887", templateIds: ["708910", "708908", "708907", "708906"], minLevel: 9 },
 
   { type: "all_templates", name: "🌟 Neon_Genesis_Founder", roleId: "1497999187944538264", templateIds: ["452006", "452005", "452004", "452003", "452002"], quantityEach: 1 },
-
   { type: "tiered_quantity", name: "🔥 War_Overlord", roleId: "1497831114650288209", templateId: "711919", minLevel: 4, quantity: 3 },
-
   { type: "founder_empire", name: "🏛 Founder_of_the_NiftyKicks_Empire", roleId: "1497998180623585531" }
 ];
 
@@ -121,7 +126,6 @@ function sleep(ms) {
 
 function loadWallets() {
   if (!fs.existsSync(WALLETS_FILE)) return {};
-
   try {
     return JSON.parse(fs.readFileSync(WALLETS_FILE, "utf8"));
   } catch (error) {
@@ -132,7 +136,6 @@ function loadWallets() {
 
 function saveWallets(wallets) {
   verifiedWallets = wallets;
-
   try {
     fs.writeFileSync(WALLETS_FILE, JSON.stringify(wallets, null, 2));
   } catch (error) {
@@ -146,10 +149,7 @@ async function registerCommands() {
       .setName("verify")
       .setDescription("Verify your WAX wallet and receive NFT roles.")
       .addStringOption(option =>
-        option
-          .setName("wallet")
-          .setDescription("Your WAX wallet")
-          .setRequired(true)
+        option.setName("wallet").setDescription("Your WAX wallet").setRequired(true)
       )
       .toJSON(),
 
@@ -171,6 +171,11 @@ async function registerCommands() {
     new SlashCommandBuilder()
       .setName("profile")
       .setDescription("Show your NiftyKicks Factory NFT profile.")
+      .toJSON(),
+
+    new SlashCommandBuilder()
+      .setName("testconvoy")
+      .setDescription("Test posting a convoy activity message to general chat.")
       .toJSON()
   ];
 
@@ -181,7 +186,7 @@ async function registerCommands() {
     { body: commands }
   );
 
-  console.log("Slash commands /verify, /refresh, /stats, /leaderboard, and /profile registered.");
+  console.log("Slash commands registered.");
 }
 
 async function getAssets(wallet) {
@@ -216,13 +221,7 @@ async function getTableRows({ code, table, lowerBound = null, upperBound = null,
   const limit = 1000;
 
   while (more) {
-    const body = {
-      json: true,
-      code,
-      scope: code,
-      table,
-      limit
-    };
+    const body = { json: true, code, scope: code, table, limit };
 
     if (useOwnerIndex) {
       body.index_position = "2";
@@ -248,6 +247,7 @@ async function getTableRows({ code, table, lowerBound = null, upperBound = null,
 
       rows.push(...(json.rows || []));
       more = Boolean(json.more);
+
       if (!more) break;
 
       nextKey = json.next_key || json.next_key === "" ? json.next_key : null;
@@ -445,7 +445,6 @@ function countTemplates(assets) {
   for (const asset of assets) {
     const templateId = getTemplateId(asset);
     if (!templateId) continue;
-
     counts[templateId] = (counts[templateId] || 0) + 1;
   }
 
@@ -858,25 +857,31 @@ async function fetchRecentConvoyActions() {
   const foundActions = [];
 
   for (const contract of CONVOY_CONTRACTS) {
-    for (const actionName of CONVOY_ACTIONS) {
-      const url =
-        `${WAX_HISTORY_API}/v2/history/get_actions` +
-        `?account=${contract}` +
-        `&filter=${contract}:${actionName}` +
-        `&sort=desc` +
-        `&limit=5`;
+    const url =
+      `${WAX_HISTORY_API}/v2/history/get_actions` +
+      `?account=${contract}` +
+      `&sort=desc` +
+      `&limit=25`;
 
-      try {
-        const response = await fetch(url);
-        const json = await response.json();
+    try {
+      const response = await fetch(url);
+      const json = await response.json();
 
-        const actions = json.actions || [];
-        for (const action of actions) {
+      const actions = json.actions || [];
+
+      console.log(`Convoy tracker checked ${contract}. Actions found: ${actions.length}`);
+
+      for (const action of actions) {
+        const actionName = action.act?.name || action.name || action.action;
+
+        console.log(`Recent action on ${contract}: ${actionName}`);
+
+        if (CONVOY_ACTIONS.includes(actionName)) {
           foundActions.push({ contract, actionName, action });
         }
-      } catch (error) {
-        console.log(`Failed to fetch convoy action ${contract}:${actionName}:`, error.message);
       }
+    } catch (error) {
+      console.log(`Failed to fetch recent actions for ${contract}:`, error.message);
     }
   }
 
@@ -895,22 +900,24 @@ async function postConvoyActivity(contract, actionName, action) {
   const wallet = getActionWallet(action);
   const tx = action.trx_id || "unknown";
 
-  if (actionName === "sendconvoy") {
+  if (actionName === "sendconvoy" || actionName === "signtcnvoy" || actionName === "mountcnvoy") {
     await channel.send(
       "🚚 **Convoy Dispatched!**\n\n" +
       `Wallet: **${wallet}**\n` +
-      `Contract: \`${contract}\`\n\n` +
+      `Contract: \`${contract}\`\n` +
+      `Action: \`${actionName}\`\n\n` +
       "A new convoy has departed the factory. Good luck on the route!\n\n" +
       `TX: \`${tx}\``
     );
     return;
   }
 
-  if (actionName === "claimconvoy") {
+  if (actionName === "claimconvoy" || actionName === "unmntcnvoy") {
     await channel.send(
       "📦 **Convoy Successfully Delivered!**\n\n" +
       `Wallet: **${wallet}**\n` +
-      `Contract: \`${contract}\`\n\n` +
+      `Contract: \`${contract}\`\n` +
+      `Action: \`${actionName}\`\n\n` +
       "Rewards have been claimed from the convoy mission. The factory keeps growing!\n\n" +
       `TX: \`${tx}\``
     );
@@ -1010,6 +1017,25 @@ client.on("interactionCreate", async interaction => {
     if (interaction.commandName === "leaderboard") {
       const message = await buildLeaderboardMessage(interaction.guild);
       await interaction.editReply(message);
+      return;
+    }
+
+    if (interaction.commandName === "testconvoy") {
+      const guild = interaction.guild;
+      const channel = guild.channels.cache.get(GENERAL_CHAT_CHANNEL_ID);
+
+      if (!channel) {
+        await interaction.editReply("General chat channel not found.");
+        return;
+      }
+
+      await channel.send(
+        "🚚 **Convoy Tracker Test**\n\n" +
+        "This is a test message from the GetRight Games Verification Bot.\n\n" +
+        "If you can see this, the bot can post convoy activity here."
+      );
+
+      await interaction.editReply("Test convoy message sent to general chat.");
       return;
     }
 
