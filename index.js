@@ -17,8 +17,10 @@ const CLIENT_ID = process.env.CLIENT_ID;
 const WALLETS_FILE = "./wallets.json";
 const VERIFIED_WALLET_ROLE_ID = "1498390601199255794";
 const LEADERBOARD_CHANNEL_ID = "1498090264734990497";
+const GENERAL_CHAT_CHANNEL_ID = "872930746451513436";
 
 const WAX_CHAIN_API = "https://wax.greymass.com";
+const WAX_HISTORY_API = "https://wax.greymass.com";
 
 const CONTRACT_ACCOUNTS = [
   "niftykickgam",
@@ -26,10 +28,19 @@ const CONTRACT_ACCOUNTS = [
   "niftykickgme"
 ];
 
+const CONVOY_CONTRACTS = [
+  "niftykickgam",
+  "niftykicksgm",
+  "niftykickgme"
+];
+
+const CONVOY_ACTIONS = ["sendconvoy", "claimconvoy"];
 const LEVEL_FIELDS = ["level", "Level", "tier", "Tier", "lvl", "Lvl"];
 
 let verifiedWallets = {};
 let scheduledRefreshRunning = false;
+let seenConvoyActionIds = new Set();
+let convoyTrackerInitialized = false;
 
 const ROLE_RULES = [
   { type: "simple_template", name: "📜 Archive_Keeper", roleId: "1497994063465545890", templateId: "680277", quantity: 1 },
@@ -155,6 +166,11 @@ async function registerCommands() {
     new SlashCommandBuilder()
       .setName("leaderboard")
       .setDescription("Show the GetRight Games NFT role leaderboard.")
+      .toJSON(),
+
+    new SlashCommandBuilder()
+      .setName("profile")
+      .setDescription("Show your NiftyKicks Factory NFT profile.")
       .toJSON()
   ];
 
@@ -165,7 +181,7 @@ async function registerCommands() {
     { body: commands }
   );
 
-  console.log("Slash commands /verify, /refresh, /stats, and /leaderboard registered.");
+  console.log("Slash commands /verify, /refresh, /stats, /leaderboard, and /profile registered.");
 }
 
 async function getAssets(wallet) {
@@ -213,13 +229,8 @@ async function getTableRows({ code, table, lowerBound = null, upperBound = null,
       body.key_type = "i64";
     }
 
-    if (nextKey) {
-      body.lower_bound = nextKey;
-    }
-
-    if (upperBound) {
-      body.upper_bound = upperBound;
-    }
+    if (nextKey) body.lower_bound = nextKey;
+    if (upperBound) body.upper_bound = upperBound;
 
     try {
       const response = await fetch(`${WAX_CHAIN_API}/v1/chain/get_table_rows`, {
@@ -236,7 +247,6 @@ async function getTableRows({ code, table, lowerBound = null, upperBound = null,
       }
 
       rows.push(...(json.rows || []));
-
       more = Boolean(json.more);
       if (!more) break;
 
@@ -378,14 +388,12 @@ function dedupeAssets(assets) {
 
   for (const asset of assets) {
     const key = String(asset.asset_id || "");
-
     if (!key) {
       unique.push(asset);
       continue;
     }
 
     if (seen.has(key)) continue;
-
     seen.add(key);
     unique.push(asset);
   }
@@ -542,6 +550,66 @@ function selectHighestGroupedRules(qualified) {
   return [...final, ...Object.values(grouped)];
 }
 
+function buildProfileStats(assets, counts) {
+  return {
+    factoryTier9: countAssetsByTemplateMinLevel(assets, "708905", 9),
+    machinesTier9Complete: hasMachineSetAtLevel(assets, 9),
+    pressingTier9: countAssetsByTemplateMinLevel(assets, "708910", 9),
+    rubberTier9: countAssetsByTemplateMinLevel(assets, "708908", 9),
+    sewingTier9: countAssetsByTemplateMinLevel(assets, "708907", 9),
+    leatherTier9: countAssetsByTemplateMinLevel(assets, "708906", 9),
+    skillLaborerTier9: countAssetsByTemplateMinLevel(assets, "708902", 9),
+    techCenterTier3: countAssetsByTemplateMinLevel(assets, "768499", 3),
+    militaryTier4: countAssetsByTemplateMinLevel(assets, "711919", 4),
+    chronicleBooks: counts["776806"] || 0,
+    neonGenesisComplete: ["452006", "452005", "452004", "452003", "452002"]
+      .every(id => (counts[id] || 0) >= 1)
+  };
+}
+
+function buildProfileMessage(member, wallet, assetData, finalRules, counts) {
+  const assets = assetData.combinedAssets;
+  const stats = buildProfileStats(assets, counts);
+
+  return (
+    `🏭 **NiftyKicks Factory Profile**\n\n` +
+    `**Player:** ${member.displayName}\n` +
+    `**Wallet:** ${wallet}\n\n` +
+    `**Assets Evaluated**\n` +
+    `Wallet NFTs: **${assetData.walletAssets.length}**\n` +
+    `Staked NFTs: **${assetData.stakedAssets.length}**\n` +
+    `Total Evaluated: **${assetData.combinedAssets.length}**\n\n` +
+    `**Progression Snapshot**\n` +
+    `🏭 Factories Tier 9: **${stats.factoryTier9}**\n` +
+    `⚙️ Machine Set Tier 9 Complete: **${stats.machinesTier9Complete ? "Yes" : "No"}**\n` +
+    `   • Pressing T9: **${stats.pressingTier9}**\n` +
+    `   • Rubber T9: **${stats.rubberTier9}**\n` +
+    `   • Sewing T9: **${stats.sewingTier9}**\n` +
+    `   • Leather T9: **${stats.leatherTier9}**\n` +
+    `👷 Skill Laborers Tier 9: **${stats.skillLaborerTier9}**\n` +
+    `🧠 Tech Centers Tier 3: **${stats.techCenterTier3}**\n` +
+    `🔥 Military Facilities Tier 4: **${stats.militaryTier4}**\n` +
+    `📖 Chronicle Books: **${stats.chronicleBooks}**\n` +
+    `🌟 Neon Genesis Set Complete: **${stats.neonGenesisComplete ? "Yes" : "No"}**\n\n` +
+    `**Current NFT Roles**\n` +
+    `${finalRules.length ? finalRules.map(r => r.name).join("\n") : "None"}`
+  );
+}
+
+async function getProfileForMember(member, wallet) {
+  const assetData = await getAllRoleAssets(wallet);
+  const assets = assetData.combinedAssets;
+  const counts = countTemplates(assets);
+
+  const qualified = ROLE_RULES.filter(rule =>
+    qualifiesForRule(rule, assets, counts)
+  );
+
+  const finalRules = selectHighestGroupedRules(qualified);
+
+  return buildProfileMessage(member, wallet, assetData, finalRules, counts);
+}
+
 async function announceMilestones(guild, member, addedRoleIds) {
   const channel = guild.channels.cache.get(LEADERBOARD_CHANNEL_ID);
 
@@ -676,7 +744,6 @@ async function buildStatsMessage(guild) {
   lines.push(`✅ **GRG Verified Wallet Role:** ${verifiedCount}`);
   lines.push(`💾 **Saved Wallets for /refresh:** ${savedWalletCount}`);
   lines.push("");
-
   lines.push("**NiftyKicks Role Counts**");
 
   const alreadyListed = new Set();
@@ -711,7 +778,6 @@ async function buildLeaderboardMessage(guild) {
   ];
 
   const lines = [];
-
   lines.push("🏆 **GetRight Games NFT Leaderboard**");
   lines.push("");
 
@@ -764,6 +830,127 @@ async function postDailyLeaderboard() {
   }
 }
 
+function getActionWallet(action) {
+  const data = action.act?.data || {};
+
+  return (
+    data.user ||
+    data.owner ||
+    data.account ||
+    data.player ||
+    data.wallet ||
+    data.from ||
+    data.to ||
+    "unknown"
+  );
+}
+
+function getActionId(action) {
+  return (
+    action.global_sequence ||
+    action.account_action_seq ||
+    action.trx_id ||
+    `${action.block_num}-${action.action_ordinal}`
+  );
+}
+
+async function fetchRecentConvoyActions() {
+  const foundActions = [];
+
+  for (const contract of CONVOY_CONTRACTS) {
+    for (const actionName of CONVOY_ACTIONS) {
+      const url =
+        `${WAX_HISTORY_API}/v2/history/get_actions` +
+        `?account=${contract}` +
+        `&filter=${contract}:${actionName}` +
+        `&sort=desc` +
+        `&limit=5`;
+
+      try {
+        const response = await fetch(url);
+        const json = await response.json();
+
+        const actions = json.actions || [];
+        for (const action of actions) {
+          foundActions.push({ contract, actionName, action });
+        }
+      } catch (error) {
+        console.log(`Failed to fetch convoy action ${contract}:${actionName}:`, error.message);
+      }
+    }
+  }
+
+  return foundActions;
+}
+
+async function postConvoyActivity(contract, actionName, action) {
+  const guild = await client.guilds.fetch(GUILD_ID);
+  const channel = guild.channels.cache.get(GENERAL_CHAT_CHANNEL_ID);
+
+  if (!channel) {
+    console.log("General chat channel not found for convoy activity.");
+    return;
+  }
+
+  const wallet = getActionWallet(action);
+  const tx = action.trx_id || "unknown";
+
+  if (actionName === "sendconvoy") {
+    await channel.send(
+      "🚚 **Convoy Dispatched!**\n\n" +
+      `Wallet: **${wallet}**\n` +
+      `Contract: \`${contract}\`\n\n` +
+      "A new convoy has departed the factory. Good luck on the route!\n\n" +
+      `TX: \`${tx}\``
+    );
+    return;
+  }
+
+  if (actionName === "claimconvoy") {
+    await channel.send(
+      "📦 **Convoy Successfully Delivered!**\n\n" +
+      `Wallet: **${wallet}**\n` +
+      `Contract: \`${contract}\`\n\n` +
+      "Rewards have been claimed from the convoy mission. The factory keeps growing!\n\n" +
+      `TX: \`${tx}\``
+    );
+  }
+}
+
+async function checkConvoyActivity() {
+  try {
+    const recentActions = await fetchRecentConvoyActions();
+
+    recentActions.reverse();
+
+    for (const item of recentActions) {
+      const actionId = getActionId(item.action);
+
+      if (!actionId) continue;
+
+      if (!convoyTrackerInitialized) {
+        seenConvoyActionIds.add(actionId);
+        continue;
+      }
+
+      if (seenConvoyActionIds.has(actionId)) continue;
+
+      seenConvoyActionIds.add(actionId);
+      await postConvoyActivity(item.contract, item.actionName, item.action);
+
+      await sleep(1000);
+    }
+
+    convoyTrackerInitialized = true;
+
+    if (seenConvoyActionIds.size > 500) {
+      seenConvoyActionIds = new Set([...seenConvoyActionIds].slice(-250));
+    }
+  } catch (error) {
+    console.error("Convoy tracker error:", error);
+  }
+}
+
 client.once("ready", async () => {
   console.log(`Logged in as ${client.user.tag}`);
 
@@ -785,6 +972,12 @@ client.once("ready", async () => {
   });
 
   console.log("Daily leaderboard post scheduled for 9:00 AM Pacific.");
+
+  setInterval(async () => {
+    await checkConvoyActivity();
+  }, 20000);
+
+  console.log("Real-time convoy activity tracker started. Checking every 20 seconds.");
 });
 
 client.on("guildMemberAdd", async member => {
@@ -817,6 +1010,23 @@ client.on("interactionCreate", async interaction => {
     if (interaction.commandName === "leaderboard") {
       const message = await buildLeaderboardMessage(interaction.guild);
       await interaction.editReply(message);
+      return;
+    }
+
+    if (interaction.commandName === "profile") {
+      const wallet = verifiedWallets[interaction.user.id];
+
+      if (!wallet) {
+        await interaction.editReply(
+          "No wallet found for you yet. Please run `/verify yourwallet.wam` first."
+        );
+        return;
+      }
+
+      const member = await interaction.guild.members.fetch(interaction.user.id);
+      const profile = await getProfileForMember(member, wallet);
+
+      await interaction.editReply(profile);
       return;
     }
 
