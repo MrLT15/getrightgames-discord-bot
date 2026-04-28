@@ -34,9 +34,7 @@ const CONVOY_CONTRACTS = [
   "niftykickgme"
 ];
 
-const CONVOY_ACTIONS = [
-  "sendconvoy"
-];
+const CONVOY_ACTIONS = ["sendconvoy"];
 
 const LEVEL_FIELDS = ["level", "Level", "tier", "Tier", "lvl", "Lvl"];
 
@@ -335,16 +333,6 @@ async function getStakedAssets(wallet) {
       }));
     }
 
-    const museums = await getRowsByOwner(contract, "kickmuseum", wallet);
-    for (const row of museums) {
-      stakedAssets.push(makePseudoAsset({
-        templateId: "KICK_MUSEUM",
-        tier: row.tier || 0,
-        assetId: row.asset_id,
-        source: `${contract}:kickmuseum`
-      }));
-    }
-
     const chronicles = await getRowsByOwner(contract, "chronicles", wallet);
     for (const row of chronicles) {
       stakedAssets.push(makePseudoAsset({
@@ -577,10 +565,6 @@ function buildProfileMessage(member, wallet, assetData, finalRules, counts) {
     `**Progression Snapshot**\n` +
     `🏭 Factories Tier 9: **${stats.factoryTier9}**\n` +
     `⚙️ Machine Set Tier 9 Complete: **${stats.machinesTier9Complete ? "Yes" : "No"}**\n` +
-    `   • Pressing T9: **${stats.pressingTier9}**\n` +
-    `   • Rubber T9: **${stats.rubberTier9}**\n` +
-    `   • Sewing T9: **${stats.sewingTier9}**\n` +
-    `   • Leather T9: **${stats.leatherTier9}**\n` +
     `👷 Skill Laborers Tier 9: **${stats.skillLaborerTier9}**\n` +
     `🧠 Tech Centers Tier 3: **${stats.techCenterTier3}**\n` +
     `🔥 Military Facilities Tier 4: **${stats.militaryTier4}**\n` +
@@ -608,10 +592,7 @@ async function getProfileForMember(member, wallet) {
 async function announceMilestones(guild, member, addedRoleIds) {
   const channel = guild.channels.cache.get(LEADERBOARD_CHANNEL_ID);
 
-  if (!channel) {
-    console.log("Leaderboard channel not found. Skipping milestone announcement.");
-    return;
-  }
+  if (!channel) return;
 
   for (const roleId of addedRoleIds) {
     const milestone = MILESTONE_ROLES[roleId];
@@ -806,10 +787,7 @@ async function postDailyLeaderboard() {
     const guild = await client.guilds.fetch(GUILD_ID);
     const channel = guild.channels.cache.get(LEADERBOARD_CHANNEL_ID);
 
-    if (!channel) {
-      console.log("Leaderboard channel not found for daily post.");
-      return;
-    }
+    if (!channel) return;
 
     const message = await buildLeaderboardMessage(guild);
 
@@ -823,21 +801,6 @@ async function postDailyLeaderboard() {
   } catch (error) {
     console.error("Failed to post daily leaderboard:", error);
   }
-}
-
-function getActionWallet(action) {
-  const data = action.act?.data || {};
-
-  return (
-    data.user ||
-    data.owner ||
-    data.account ||
-    data.player ||
-    data.wallet ||
-    data.from ||
-    data.to ||
-    "unknown"
-  );
 }
 
 function getActionId(action) {
@@ -857,23 +820,6 @@ function getActionDataValue(action, keys) {
   return null;
 }
 
-function formatConvoyExtraDetails(action) {
-  const route =
-    getActionDataValue(action, ["route", "route_id", "routeid", "mission", "mission_id", "missionid"]);
-  const convoy =
-    getActionDataValue(action, ["convoy_id", "convoyid", "convoy", "id"]);
-  const crates =
-    getActionDataValue(action, ["crates", "crate_count", "cratecount", "amount", "quantity"]);
-
-  const details = [];
-
-  if (route !== null) details.push(`Route/Mission: **${route}**`);
-  if (convoy !== null) details.push(`Convoy ID: **${convoy}**`);
-  if (crates !== null) details.push(`Crates/Quantity: **${crates}**`);
-
-  return details.length ? details.join("\n") + "\n" : "";
-}
-
 async function fetchRecentConvoyActions() {
   const foundActions = [];
 
@@ -890,12 +836,8 @@ async function fetchRecentConvoyActions() {
 
       const actions = json.actions || [];
 
-      console.log(`Convoy tracker checked ${contract}. Actions found: ${actions.length}`);
-
       for (const action of actions) {
         const actionName = action.act?.name || action.name || action.action;
-
-        console.log(`Recent action on ${contract}: ${actionName}`);
 
         if (CONVOY_ACTIONS.includes(actionName)) {
           foundActions.push({ contract, actionName, action });
@@ -916,15 +858,10 @@ async function postConvoyActivity(contract, actionName, action) {
   if (!channel) return;
 
   const route =
-    action.act?.data?.route ||
-    action.act?.data?.route_id ||
-    action.act?.data?.mission ||
-    "Unknown";
+    getActionDataValue(action, ["route", "route_id", "routeid", "mission", "mission_id", "missionid"]) || "Unknown";
 
   const convoy =
-    action.act?.data?.convoy_id ||
-    action.act?.data?.convoy ||
-    "Unknown";
+    getActionDataValue(action, ["convoy_id", "convoyid", "convoy", "id"]) || "Unknown";
 
   await channel.send(
     "🚚 **Convoy Dispatched!**\n\n" +
@@ -933,19 +870,6 @@ async function postConvoyActivity(contract, actionName, action) {
     "A new convoy has departed from the factory.\n" +
     "Good luck on the route!"
   );
-    return;
-  }
-
-  if (actionName === "claimconvoy" || actionName === "unmntcnvoy") {
-    await channel.send(
-      "📦 **Convoy Successfully Delivered!**\n\n" +
-      `Wallet: **${wallet}**\n` +
-      `Action: \`${actionName}\`\n` +
-      `${extraDetails}` +
-      "\nRewards have been claimed from the convoy mission. The factory keeps growing!\n\n" +
-      `TX: \`${tx}\``
-    );
-  }
 }
 
 async function checkConvoyActivity() {
@@ -1050,8 +974,7 @@ client.on("interactionCreate", async interaction => {
     }
 
     if (interaction.commandName === "testconvoy") {
-      const guild = interaction.guild;
-      const channel = guild.channels.cache.get(GENERAL_CHAT_CHANNEL_ID);
+      const channel = interaction.guild.channels.cache.get(GENERAL_CHAT_CHANNEL_ID);
 
       if (!channel) {
         await interaction.editReply("General chat channel not found.");
@@ -1060,8 +983,7 @@ client.on("interactionCreate", async interaction => {
 
       await channel.send(
         "🚚 **Convoy Tracker Test**\n\n" +
-        "This is a test message from the GetRight Games Verification Bot.\n\n" +
-        "If you can see this, the bot can post convoy activity here."
+        "This is a test message from the GetRight Games Verification Bot."
       );
 
       await interaction.editReply("Test convoy message sent to general chat.");
