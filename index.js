@@ -35,14 +35,7 @@ const CONVOY_CONTRACTS = [
 ];
 
 const CONVOY_ACTIONS = [
-  "sendconvoy",
-  "claimconvoy",
-  "signtcnvoy",
-  "mountcnvoy",
-  "unmntcnvoy",
-  "addcrates",
-  "addvehicle",
-  "editcnvoy"
+  "sendconvoy"
 ];
 
 const LEVEL_FIELDS = ["level", "Level", "tier", "Tier", "lvl", "Lvl"];
@@ -920,31 +913,26 @@ async function postConvoyActivity(contract, actionName, action) {
   const guild = await client.guilds.fetch(GUILD_ID);
   const channel = guild.channels.cache.get(GENERAL_CHAT_CHANNEL_ID);
 
-  if (!channel) {
-    console.log("General chat channel not found for convoy activity.");
-    return;
-  }
+  if (!channel) return;
 
-  const wallet = getActionWallet(action);
-  const tx = action.trx_id || "unknown";
-  const extraDetails = formatConvoyExtraDetails(action);
+  const route =
+    action.act?.data?.route ||
+    action.act?.data?.route_id ||
+    action.act?.data?.mission ||
+    "Unknown";
 
-  if (
-    actionName === "sendconvoy" ||
-    actionName === "signtcnvoy" ||
-    actionName === "mountcnvoy" ||
-    actionName === "addcrates" ||
-    actionName === "addvehicle" ||
-    actionName === "editcnvoy"
-  ) {
-    await channel.send(
-      "🚚 **Convoy Activity Detected!**\n\n" +
-      `Wallet: **${wallet}**\n` +
-      `Action: \`${actionName}\`\n` +
-      `${extraDetails}` +
-      "\nA convoy was prepared, equipped, or dispatched inside NiftyKicks Factory.\n\n" +
-      `TX: \`${tx}\``
-    );
+  const convoy =
+    action.act?.data?.convoy_id ||
+    action.act?.data?.convoy ||
+    "Unknown";
+
+  await channel.send(
+    "🚚 **Convoy Dispatched!**\n\n" +
+    `Route / Mission: **${route}**\n` +
+    `Convoy ID: **${convoy}**\n\n` +
+    "A new convoy has departed from the factory.\n" +
+    "Good luck on the route!"
+  );
     return;
   }
 
