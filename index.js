@@ -852,24 +852,75 @@ async function fetchRecentConvoyActions() {
 }
 
 async function postConvoyActivity(contract, actionName, action) {
+
   const guild = await client.guilds.fetch(GUILD_ID);
   const channel = guild.channels.cache.get(GENERAL_CHAT_CHANNEL_ID);
 
   if (!channel) return;
 
+  const wallet =
+    action.act?.data?.user ||
+    action.act?.data?.owner ||
+    action.act?.data?.account ||
+    action.act?.data?.player ||
+    "Unknown";
+
   const route =
-    getActionDataValue(action, ["route", "route_id", "routeid", "mission", "mission_id", "missionid"]) || "Unknown";
+    action.act?.data?.route ||
+    action.act?.data?.route_id ||
+    action.act?.data?.mission ||
+    "Unknown";
 
   const convoy =
-    getActionDataValue(action, ["convoy_id", "convoyid", "convoy", "id"]) || "Unknown";
+    action.act?.data?.convoy_id ||
+    action.act?.data?.convoy ||
+    "Unknown";
+
+  // Find Discord user if wallet is verified
+  let discordUser = null;
+
+  for (const [discordId, savedWallet] of Object.entries(verifiedWallets)) {
+    if (savedWallet === wallet) {
+      discordUser = `<@${discordId}>`;
+      break;
+    }
+  }
+
+  const playerDisplay = discordUser
+    ? `${wallet} (${discordUser})`
+    : wallet;
+
+  // Route-based convoy emoji
+  let convoyEmoji = "🚚";
+
+  if (route == 2) convoyEmoji = "🚛";
+  if (route == 3) convoyEmoji = "🛻";
+  if (route == 4) convoyEmoji = "🚀";
+
+  // Random flavor messages
+  const messages = [
+    "Good luck on the route!",
+    "Engines roaring — another convoy begins its journey.",
+    "Supplies are on the move!",
+    "The factory logistics never sleep.",
+    "A convoy ventures into the unknown.",
+    "Drivers report all systems ready.",
+    "Cargo secured. Convoy departing.",
+    "Another mission underway.",
+    "Routes are active across the NiftyKicks network.",
+    "The convoy pushes deeper into the wasteland."
+  ];
+
+  const randomMessage = messages[Math.floor(Math.random() * messages.length)];
 
   await channel.send(
-    "🚚 **Convoy Dispatched!**\n\n" +
+    `${convoyEmoji} **Convoy Dispatched!**\n\n` +
+    `Wallet: **${playerDisplay}**\n` +
     `Route / Mission: **${route}**\n` +
     `Convoy ID: **${convoy}**\n\n` +
-    "A new convoy has departed from the factory.\n" +
-    "Good luck on the route!"
+    `${randomMessage}`
   );
+
 }
 
 async function checkConvoyActivity() {
