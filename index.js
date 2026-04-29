@@ -1396,7 +1396,7 @@ if (publicChannel) {
     ? `💥 **CONVOY RAID SUCCESS!**\n\nRaider: **${member.displayName}**\nFaction: **${getFactionLabel(faction)}**\nConvoy ID: **${activeConvoy.id}**\n\n${publicFlavor}\n\n💰 Loot: **${reward} $NKFE**`
     : `🛡️ **RAID FAILED!**\n\nRaider: **${member.displayName}**\nFaction: **${getFactionLabel(faction)}**\nConvoy ID: **${activeConvoy.id}**\n\n${publicFlavor}`;
 
-  await publicChannel.send(publicMessage);
+  publicChannel.send(publicMessage);
 }
 async function buildRaidStatsMessage(discordId, displayName) {
   const wallet = await getVerifiedWallet(discordId);
