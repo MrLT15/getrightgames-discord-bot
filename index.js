@@ -115,49 +115,36 @@ A new legend has entered the factory.`
   },
   "1497831114650288209": {
     title: "🔥 War Overlord",
-    message:
-      "🔥 **NEW POWERHOUSE UNLOCKED!** 🔥
+message: `🔥 **NEW POWERHOUSE UNLOCKED!** 🔥
 
-" +
-      "**{player}** has become a
+**{player}** has become a
 
-" +
-      "🔥 **War Overlord** 🔥
+🔥 **War Overlord** 🔥
 
-" +
-      "Commanding overwhelming military strength inside NiftyKicks Factory.
+Commanding overwhelming military strength inside NiftyKicks Factory.
 
-" +
-      "The battlefield just changed."
-  },
-  "1497999187944538264": {
-    title: "🌟 Neon Genesis Founder",
-    message:
-      "🌟 **GENESIS STATUS UNLOCKED!** 🌟
+The battlefield just changed.`
+},
+"1497999187944538264": {
+  title: "🌟 Neon Genesis Founder",
+  message: `🌟 **GENESIS STATUS UNLOCKED!** 🌟
 
-" +
-      "**{player}** has become a
+**{player}** has become a
 
-" +
-      "🌟 **Neon Genesis Founder** 🌟
+🌟 **Neon Genesis Founder** 🌟
 
-" +
-      "Holding the full original Neon Kicks set — one of the rarest legacy achievements in NiftyKicks Factory."
-  },
-  "1497993072481406986": {
-    title: "🏭 Industrial Tycoon",
-    message:
-      "🏭 **FACTORY EMPIRE EXPANDED!** 🏭
+Holding the full original Neon Kicks set — one of the rarest legacy achievements in NiftyKicks Factory.`
+},
+"1497993072481406986": {
+  title: "🏭 Industrial Tycoon",
+  message: `🏭 **FACTORY EMPIRE EXPANDED!** 🏭
 
-" +
-      "**{player}** has become an
+**{player}** has become an
 
-" +
-      "🏭 **Industrial Tycoon** 🏭
+🏭 **Industrial Tycoon** 🏭
 
-" +
-      "Maximum factory power has been achieved."
-  }
+Maximum factory power has been achieved.`
+}
 };
 
 const client = new Client({
