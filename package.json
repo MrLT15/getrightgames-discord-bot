@@ -3,6 +3,7 @@
   "version": "1.2.0",
   "description": "Discord bot that verifies WAX wallets and assigns NFT roles for GetRight Games.",
   "main": "index.js",
+  "type": "commonjs",
   "scripts": {
     "start": "node index.js"
   },
