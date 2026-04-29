@@ -867,9 +867,9 @@ async function postDailyLeaderboard() {
 
     const message = await buildLeaderboardMessage(guild);
     await channel.send(
-      "🏆 **Daily NiftyKicks Factory Prestige Board** 🏆
+      "🏆 **Daily NiftyKicks Factory Prestige Board** 🏆"
 
-" +
+  +
       message +
       "
 
