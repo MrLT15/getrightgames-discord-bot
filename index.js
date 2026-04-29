@@ -103,7 +103,7 @@ const ROLE_RULES = [
 const MILESTONE_ROLES = {
   "1497998180623585531": {
     title: "🏛 Founder of the NiftyKicks Empire",
-    message: `🌟 **HISTORY HAS BEEN MADE!** 🌟
+message: `🌟 **HISTORY HAS BEEN MADE!** 🌟
 
 **{player}** has become a
 
