@@ -871,7 +871,6 @@ async function postDailyLeaderboard() {
 
   +
       message +
-      "
 
 Use `/verify wallet.wam` to claim your roles.
 Use `/leaderboard` anytime to view the current board."
