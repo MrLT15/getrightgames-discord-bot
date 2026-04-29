@@ -1384,20 +1384,29 @@ async function handleRaid(interaction) {
       flavor
     );
   }
+  const publicChannel =
+    interaction.guild.channels.cache.get(GENERAL_CHAT_CHANNEL_ID) ||
+    await interaction.guild.channels.fetch(GENERAL_CHAT_CHANNEL_ID).catch(() => null);
+
+  if (publicChannel?.isTextBased()) {
+    const publicFlavor = success
+      ? successMessages[Math.floor(Math.random() * successMessages.length)]
+      : failMessages[Math.floor(Math.random() * failMessages.length)];
+
+    const publicMessage = success
+      ? `💥 **CONVOY RAID SUCCESS!**\n\nRaider: **${member.displayName}**\nFaction: **${getFactionLabel(faction)}**\nConvoy ID: **${activeConvoy.id}**\n\n${publicFlavor}\n\n💰 Loot: **${reward} $NKFE**`
+      : `🛡️ **RAID FAILED!**\n\nRaider: **${member.displayName}**\nFaction: **${getFactionLabel(faction)}**\nConvoy ID: **${activeConvoy.id}**\n\n${publicFlavor}`;
+
+    try {
+      await publicChannel.send(publicMessage);
+    } catch (error) {
+      console.error("Failed to send public raid result:", error);
+    }
+  } else {
+    console.error(`Raid result channel ${GENERAL_CHAT_CHANNEL_ID} was not found or is not text-based.`);
+  }
 }
-const publicChannel = client.channels.cache.get(GENERAL_CHAT_CHANNEL_ID);
 
-if (publicChannel) {
-  const publicFlavor = success
-    ? successMessages[Math.floor(Math.random() * successMessages.length)]
-    : failMessages[Math.floor(Math.random() * failMessages.length)];
-
-  const publicMessage = success
-    ? `💥 **CONVOY RAID SUCCESS!**\n\nRaider: **${member.displayName}**\nFaction: **${getFactionLabel(faction)}**\nConvoy ID: **${activeConvoy.id}**\n\n${publicFlavor}\n\n💰 Loot: **${reward} $NKFE**`
-    : `🛡️ **RAID FAILED!**\n\nRaider: **${member.displayName}**\nFaction: **${getFactionLabel(faction)}**\nConvoy ID: **${activeConvoy.id}**\n\n${publicFlavor}`;
-
-  publicChannel.send(publicMessage);
-}
 async function buildRaidStatsMessage(discordId, displayName) {
   const wallet = await getVerifiedWallet(discordId);
   if (!wallet) return "No verified wallet found. Run `/verify wallet.wam` first.";
