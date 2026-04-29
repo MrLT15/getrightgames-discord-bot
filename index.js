@@ -7,7 +7,7 @@ const {
   PermissionFlagsBits
 } = require("discord.js");
 
-const fetch = require("node-fetch");
+// Node 18+ includes global fetch. Do not require node-fetch v3 from CommonJS.
 const cron = require("node-cron");
 const { Pool } = require("pg");
 
@@ -15,6 +15,13 @@ const TOKEN = process.env.DISCORD_TOKEN;
 const GUILD_ID = process.env.GUILD_ID;
 const CLIENT_ID = process.env.CLIENT_ID;
 const DATABASE_URL = process.env.DATABASE_URL;
+
+const REQUIRED_ENV_VARS = { TOKEN, GUILD_ID, CLIENT_ID, DATABASE_URL };
+for (const [key, value] of Object.entries(REQUIRED_ENV_VARS)) {
+  if (!value) {
+    throw new Error(`Missing required environment variable: ${key}`);
+  }
+}
 
 const VERIFIED_WALLET_ROLE_ID = "1498390601199255794";
 const LEADERBOARD_CHANNEL_ID = "1498090264734990497";
@@ -103,48 +110,38 @@ const ROLE_RULES = [
 const MILESTONE_ROLES = {
   "1497998180623585531": {
     title: "🏛 Founder of the NiftyKicks Empire",
-message: `🌟 **HISTORY HAS BEEN MADE!** 🌟
-
-**{player}** has become a
-
-🏛 **Founder of the NiftyKicks Empire** 🏛
-
-This is one of the highest achievements in NiftyKicks Factory — representing dominance across factories, machines, workforce, tech, military, chronicles, and Genesis history.
-
-A new legend has entered the factory.`
+    message:
+      "🌟 **HISTORY HAS BEEN MADE!** 🌟\n\n" +
+      "**{player}** has become a\n\n" +
+      "🏛 **Founder of the NiftyKicks Empire** 🏛\n\n" +
+      "This is one of the highest achievements in NiftyKicks Factory — representing dominance across factories, machines, workforce, tech, military, chronicles, and Genesis history.\n\n" +
+      "A new legend has entered the factory."
   },
   "1497831114650288209": {
     title: "🔥 War Overlord",
-message: `🔥 **NEW POWERHOUSE UNLOCKED!** 🔥
-
-**{player}** has become a
-
-🔥 **War Overlord** 🔥
-
-Commanding overwhelming military strength inside NiftyKicks Factory.
-
-The battlefield just changed.`
-},
-"1497999187944538264": {
-  title: "🌟 Neon Genesis Founder",
-  message: `🌟 **GENESIS STATUS UNLOCKED!** 🌟
-
-**{player}** has become a
-
-🌟 **Neon Genesis Founder** 🌟
-
-Holding the full original Neon Kicks set — one of the rarest legacy achievements in NiftyKicks Factory.`
-},
-"1497993072481406986": {
-  title: "🏭 Industrial Tycoon",
-  message: `🏭 **FACTORY EMPIRE EXPANDED!** 🏭
-
-**{player}** has become an
-
-🏭 **Industrial Tycoon** 🏭
-
-Maximum factory power has been achieved.`
-}
+    message:
+      "🔥 **NEW POWERHOUSE UNLOCKED!** 🔥\n\n" +
+      "**{player}** has become a\n\n" +
+      "🔥 **War Overlord** 🔥\n\n" +
+      "Commanding overwhelming military strength inside NiftyKicks Factory.\n\n" +
+      "The battlefield just changed."
+  },
+  "1497999187944538264": {
+    title: "🌟 Neon Genesis Founder",
+    message:
+      "🌟 **GENESIS STATUS UNLOCKED!** 🌟\n\n" +
+      "**{player}** has become a\n\n" +
+      "🌟 **Neon Genesis Founder** 🌟\n\n" +
+      "Holding the full original Neon Kicks set — one of the rarest legacy achievements in NiftyKicks Factory."
+  },
+  "1497993072481406986": {
+    title: "🏭 Industrial Tycoon",
+    message:
+      "🏭 **FACTORY EMPIRE EXPANDED!** 🏭\n\n" +
+      "**{player}** has become an\n\n" +
+      "🏭 **Industrial Tycoon** 🏭\n\n" +
+      "Maximum factory power has been achieved."
+  }
 };
 
 const client = new Client({
@@ -800,8 +797,7 @@ function buildProfileMessage(member, wallet, assetData, finalRules, counts) {
 ` +
     `**Current NFT Roles**
 ` +
-`${finalRules.length ? finalRules.map(r => r.name).join("\n") : "None"}`
-") : "None"}`
+    `${finalRules.length ? finalRules.map(r => r.name).join("\n") : "None"}`
   );
 }
 
@@ -940,8 +936,7 @@ async function buildStatsMessage(guild) {
   lines.push("");
   lines.push("_Note: Stats are based on currently cached Discord role data. Scheduled refresh runs every 1 hour._");
 
-  return lines.join("
-");
+  return lines.join("\n");
 }
 
 async function buildLeaderboardMessage(guild) {
@@ -968,8 +963,7 @@ async function buildLeaderboardMessage(guild) {
     lines.push(`**${item.title}: ${members.length}**`);
 
     if (members.length) {
-      const names = members.slice(0, 10).map((member, index) => `${index + 1}. ${member.displayName}`).join("
-");
+      const names = members.slice(0, 10).map((member, index) => `${index + 1}. ${member.displayName}`).join("\n");
       lines.push(names);
     } else {
       lines.push("_No holders yet_");
@@ -979,8 +973,7 @@ async function buildLeaderboardMessage(guild) {
   }
 
   lines.push("_Leaderboard is based on currently cached Discord role data._");
-  return lines.join("
-");
+  return lines.join("\n");
 }
 
 async function postDailyLeaderboard() {
@@ -991,14 +984,9 @@ async function postDailyLeaderboard() {
 
     const message = await buildLeaderboardMessage(guild);
     await channel.send(
-      "🏆 **Daily NiftyKicks Factory Prestige Board** 🏆
-
-" +
+      "🏆 **Daily NiftyKicks Factory Prestige Board** 🏆\n\n" +
       message +
-      "
-
-Use `/verify wallet.wam` to claim your roles.
-Use `/leaderboard` anytime to view the current board."
+      "\n\nUse `/verify wallet.wam` to claim your roles.\nUse `/leaderboard` anytime to view the current board."
     );
     console.log("Daily leaderboard posted.");
   } catch (error) {
@@ -1021,12 +1009,8 @@ async function postWeeklyRaidLeaderboardAndReset() {
 
     if (!result.rows.length) {
       await channel.send(
-        "🏴 **Weekly Convoy Raiders Results** 🏴
-
-" +
-        "No raid activity was recorded this week.
-
-" +
+        "🏴 **Weekly Convoy Raiders Results** 🏴\n\n" +
+        "No raid activity was recorded this week.\n\n" +
         "A new raid week has started."
       );
       return;
@@ -1061,11 +1045,7 @@ async function postWeeklyRaidLeaderboardAndReset() {
 
     let factionWarMessage = "";
     if (factionLines.length) {
-      factionWarMessage += "
-
-⚔️ **Weekly Faction War Standings**
-" + factionLines.join("
-");
+      factionWarMessage += "\n\n⚔️ **Weekly Faction War Standings**\n" + factionLines.join("\n");
     }
 
     if (eligibleWinner) {
@@ -1097,31 +1077,21 @@ async function postWeeklyRaidLeaderboardAndReset() {
         `Each Eligible Raider Receives: **${eachReward} NKFE**
 
 ` +
-        winnerLines.join("
-");
+        winnerLines.join("\n");
     } else {
       factionWarMessage +=
-        "
-
-⚠️ **No faction qualified for the 500 NKFE faction reward this week.**
-" +
+        "\n\n⚠️ **No faction qualified for the 500 NKFE faction reward this week.**\n" +
         `Requirement: at least ${MIN_FACTION_MEMBERS} active faction raiders and ${MIN_FACTION_SUCCESSFUL_RAIDS} successful faction raids.`;
     }
 
     await channel.send(
-      "🏴 **Weekly Convoy Raiders Results & Payout Record** 🏴
-
-" +
-      payoutLines.join("
-") +
+      "🏴 **Weekly Convoy Raiders Results & Payout Record** 🏴\n\n" +
+      payoutLines.join("\n") +
       `
 
 💰 **Total Raid NKFE Owed This Week:** ${totalPayout} NKFE` +
       factionWarMessage +
-      "
-
-This post is the weekly payout record.
-" +
+      "\n\nThis post is the weekly payout record.\n" +
       "The weekly raid leaderboard has now been reset for the next week."
     );
 
@@ -1192,9 +1162,7 @@ async function openRaidWindow({ route, convoyId, wallet, legendary }) {
 
   if (legendary) {
     await channel.send(
-      "🚨 **LEGENDARY CONVOY DETECTED!** 🚨
-
-" +
+      "🚨 **LEGENDARY CONVOY DETECTED!** 🚨\n\n" +
       `Route / Mission: **${route}**
 ` +
       `Convoy ID: **${convoyId}**
@@ -1202,16 +1170,12 @@ async function openRaidWindow({ route, convoyId, wallet, legendary }) {
 ` +
       `Raid window: **${RAID_WINDOW_SECONDS} seconds**
 ` +
-      "Potential loot: **25–75 $NKFE**
-
-" +
+      "Potential loot: **25–75 $NKFE**\n\n" +
       "Verified wallets can run `/raid` now."
     );
   } else {
     await channel.send(
-      "⚠️ **Convoy Raiders Alert!** ⚠️
-
-" +
+      "⚠️ **Convoy Raiders Alert!** ⚠️\n\n" +
       `Route / Mission: **${route}**
 ` +
       `Convoy ID: **${convoyId}**
@@ -1219,9 +1183,7 @@ async function openRaidWindow({ route, convoyId, wallet, legendary }) {
 ` +
       `Raid window: **${RAID_WINDOW_SECONDS} seconds**
 ` +
-      "Reward: **1–5 $NKFE**
-
-" +
+      "Reward: **1–5 $NKFE**\n\n" +
       "Verified wallets can run `/raid` now."
     );
   }
@@ -1391,9 +1353,7 @@ async function handleRaid(interaction) {
   if (success) {
     const flavor = successMessages[Math.floor(Math.random() * successMessages.length)];
     await interaction.editReply(
-      "⚔️ **Raid Successful!**
-
-" +
+      "⚔️ **Raid Successful!**\n\n" +
       `Raider: **${member.displayName}**
 ` +
       `Wallet: **${wallet}**
@@ -1411,9 +1371,7 @@ async function handleRaid(interaction) {
   } else {
     const flavor = failMessages[Math.floor(Math.random() * failMessages.length)];
     await interaction.editReply(
-      "🛡️ **Raid Failed!**
-
-" +
+      "🛡️ **Raid Failed!**\n\n" +
       `Raider: **${member.displayName}**
 ` +
       `Wallet: **${wallet}**
@@ -1439,9 +1397,7 @@ async function buildRaidStatsMessage(discordId, displayName) {
   const successRate = attempts ? Math.round((successes / attempts) * 100) : 0;
 
   return (
-    "📊 **Convoy Raider Stats**
-
-" +
+    "📊 **Convoy Raider Stats**\n\n" +
     `Player: **${displayName}**
 ` +
     `Wallet: **${wallet}**
@@ -1550,9 +1506,7 @@ client.on("interactionCreate", async interaction => {
         await interaction.editReply("General chat channel not found.");
         return;
       }
-      await channel.send("🚚 **Convoy Tracker Test**
-
-This is a test message from the GetRight Games Verification Bot.");
+      await channel.send("🚚 **Convoy Tracker Test**\n\nThis is a test message from the GetRight Games Verification Bot.");
       await interaction.editReply("Test convoy message sent to general chat.");
       return;
     }
@@ -1631,10 +1585,7 @@ This is a test message from the GetRight Games Verification Bot.");
         `${index + 1}. <@${row.discord_id}> — **${row.weekly_nkfe} NKFE this week** | ${row.weekly_successes}/${row.weekly_attempts} successful | Lifetime: ${row.lifetime_nkfe} NKFE | ${getFactionLabel(row.faction)}`
       );
 
-      await interaction.editReply("🏆 **Weekly Convoy Raiders Leaderboard**
-
-" + lines.join("
-"));
+      await interaction.editReply("🏆 **Weekly Convoy Raiders Leaderboard**\n\n" + lines.join("\n"));
       return;
     }
 
@@ -1660,10 +1611,7 @@ This is a test message from the GetRight Games Verification Bot.");
         `${index + 1}. **${getFactionLabel(row.faction)}** — **${row.total_nkfe || 0} NKFE this week** | ${row.successes || 0}/${row.attempts || 0} successful | Active raiders: ${row.active_members}`
       );
 
-      await interaction.editReply("🏴 **Convoy Raiders Faction Standings**
-
-" + lines.join("
-"));
+      await interaction.editReply("🏴 **Convoy Raiders Faction Standings**\n\n" + lines.join("\n"));
       return;
     }
 
@@ -1682,14 +1630,9 @@ This is a test message from the GetRight Games Verification Bot.");
 
       const lines = result.rows.map(row => `${row.wallet} — **${row.payout_nkfe} NKFE** — <@${row.discord_id}>`);
       await interaction.editReply(
-        "💰 **Convoy Raiders Manual Payout List**
-
-" +
-        lines.join("
-") +
-        "
-
-After paying from the treasury wallet, run `/resetraidpayouts`."
+        "💰 **Convoy Raiders Manual Payout List**\n\n" +
+        lines.join("\n") +
+        "\n\nAfter paying from the treasury wallet, run `/resetraidpayouts`."
       );
       return;
     }
@@ -1741,20 +1684,17 @@ After paying from the treasury wallet, run `/resetraidpayouts`."
 ` +
       `**NFT Role Requirements Met:**
 ` +
-      `${result.qualifiedNames.length ? result.qualifiedNames.join("
-") : "None"}
+      `${result.qualifiedNames.length ? result.qualifiedNames.join("\n") : "None"}
 
 ` +
       `**Roles Added:**
 ` +
-      `${result.added.length ? result.added.join("
-") : "None"}
+      `${result.added.length ? result.added.join("\n") : "None"}
 
 ` +
       `**Roles Removed:**
 ` +
-      `${result.removed.length ? result.removed.join("
-") : "None"}
+      `${result.removed.length ? result.removed.join("\n") : "None"}
 
 ` +
       commandNote
