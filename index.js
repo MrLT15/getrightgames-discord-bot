@@ -103,20 +103,15 @@ const ROLE_RULES = [
 const MILESTONE_ROLES = {
   "1497998180623585531": {
     title: "🏛 Founder of the NiftyKicks Empire",
-    message:
-      "🌟 **HISTORY HAS BEEN MADE!** 🌟
+    message: `🌟 **HISTORY HAS BEEN MADE!** 🌟
 
-" +
-      "**{player}** has become a
+**{player}** has become a
 
-" +
-      "🏛 **Founder of the NiftyKicks Empire** 🏛
+🏛 **Founder of the NiftyKicks Empire** 🏛
 
-" +
-      "This is one of the highest achievements in NiftyKicks Factory — representing dominance across factories, machines, workforce, tech, military, chronicles, and Genesis history.
+This is one of the highest achievements in NiftyKicks Factory — representing dominance across factories, machines, workforce, tech, military, chronicles, and Genesis history.
 
-" +
-      "A new legend has entered the factory."
+A new legend has entered the factory.`
   },
   "1497831114650288209": {
     title: "🔥 War Overlord",
