@@ -800,7 +800,7 @@ function buildProfileMessage(member, wallet, assetData, finalRules, counts) {
 ` +
     `**Current NFT Roles**
 ` +
-    `${finalRules.length ? finalRules.map(r => r.name).join("
+`${finalRules.length ? finalRules.map(r => r.name).join("\n") : "None"}`
 ") : "None"}`
   );
 }
