@@ -35,7 +35,7 @@ const CONVOY_CONTRACTS = ["niftykickgam"];
 const CONVOY_ACTIONS = ["sendconvoy"];
 const LEVEL_FIELDS = ["level", "Level", "tier", "Tier", "lvl", "Lvl"];
 
-const RAID_WINDOW_SECONDS = 20;
+const RAID_WINDOW_SECONDS = 60;
 const RAID_SUCCESS_CHANCE = 0.40;
 const LEGENDARY_CONVOY_CHANCE = 0.08;
 const LEGENDARY_RAID_SUCCESS_CHANCE = 0.25;
