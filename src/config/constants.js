@@ -5,7 +5,16 @@ const GENERAL_CHAT_CHANNEL_ID = "1498087642120851677";
 
 const WAX_CHAIN_API = "https://wax.greymass.com";
 const WAX_HISTORY_API = "https://api.waxsweden.org";
-
+const DEFAULT_WAX_HISTORY_APIS = [
+  WAX_HISTORY_API,
+  "https://wax.eosrio.io",
+  "https://wax.eosphere.io",
+  "https://api.wax.alohaeos.com"
+];
+const WAX_HISTORY_APIS = (process.env.WAX_HISTORY_APIS || DEFAULT_WAX_HISTORY_APIS.join(","))
+  .split(",")
+  .map(api => api.trim())
+  .filter(Boolean);
 const CONTRACT_ACCOUNTS = ["niftykickgam", "niftykicksgm", "niftykickgme"];
 const CONVOY_CONTRACTS = ["niftykickgam"];
 const CONVOY_ACTIONS = ["sendconvoy"];
