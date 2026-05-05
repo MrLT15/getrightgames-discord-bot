@@ -23,48 +23,25 @@ for (const [key, value] of Object.entries(REQUIRED_ENV_VARS)) {
   }
 }
 
-const VERIFIED_WALLET_ROLE_ID = "1498390601199255794";
-const LEADERBOARD_CHANNEL_ID = "1498090264734990497";
-const GENERAL_CHAT_CHANNEL_ID = "872930746451513436";
-
-const WAX_CHAIN_API = "https://wax.greymass.com";
-const WAX_HISTORY_API = "https://api.waxsweden.org";
-
-const CONTRACT_ACCOUNTS = ["niftykickgam", "niftykicksgm", "niftykickgme"];
-const CONVOY_CONTRACTS = ["niftykickgam"];
-const CONVOY_ACTIONS = ["sendconvoy"];
-const LEVEL_FIELDS = ["level", "Level", "tier", "Tier", "lvl", "Lvl"];
-
-const RAID_WINDOW_SECONDS = 60;
-const RAID_SUCCESS_CHANCE = 0.40;
-const LEGENDARY_CONVOY_CHANCE = 0.08;
-const LEGENDARY_RAID_SUCCESS_CHANCE = 0.25;
-const FACTION_WAR_REWARD_NKFE = 500;
-const MIN_FACTION_MEMBERS = 3;
-const MIN_FACTION_SUCCESSFUL_RAIDS = 5;
-
-const RAIDER_FACTIONS = {
-  iron_wolves: {
-    name: "Iron Wolves",
-    emoji: "🐺",
-    description: "Aggressive raiders who strike fast and hard."
-  },
-  neon_bandits: {
-    name: "Neon Bandits",
-    emoji: "🌌",
-    description: "Flashy scavengers chasing high-value convoys."
-  },
-  steel_serpents: {
-    name: "Steel Serpents",
-    emoji: "🐍",
-    description: "Patient strategists waiting for the perfect ambush."
-  },
-  shadow_couriers: {
-    name: "Shadow Couriers",
-    emoji: "🕶️",
-    description: "Silent interceptors operating in the dark routes."
-  }
-};
+const {
+  VERIFIED_WALLET_ROLE_ID,
+  LEADERBOARD_CHANNEL_ID,
+  GENERAL_CHAT_CHANNEL_ID,
+  WAX_CHAIN_API,
+  WAX_HISTORY_API,
+  CONTRACT_ACCOUNTS,
+  CONVOY_CONTRACTS,
+  CONVOY_ACTIONS,
+  LEVEL_FIELDS,
+  RAID_WINDOW_SECONDS,
+  RAID_SUCCESS_CHANCE,
+  LEGENDARY_CONVOY_CHANCE,
+  LEGENDARY_RAID_SUCCESS_CHANCE,
+  FACTION_WAR_REWARD_NKFE,
+  MIN_FACTION_MEMBERS,
+  MIN_FACTION_SUCCESSFUL_RAIDS,
+  RAIDER_FACTIONS
+} = require("./src/config/constants");
 
 let verifiedWallets = {};
 let scheduledRefreshRunning = false;
@@ -233,6 +210,11 @@ async function saveWalletToDatabase(discordId, wallet) {
     [discordId, wallet]
   );
   verifiedWallets[discordId] = wallet;
+}
+
+async function removeWalletFromDatabase(discordId) {
+  await pool.query("DELETE FROM verified_wallets WHERE discord_id = $1", [discordId]);
+  delete verifiedWallets[discordId];
 }
 
 async function getVerifiedWallet(discordId) {
@@ -901,6 +883,12 @@ async function refreshAllVerifiedWallets() {
       console.log(`Refreshed ${wallet} for Discord user ${discordId}`);
       await sleep(1500);
     } catch (error) {
+      if (error?.code === 10007 || error?.status === 404) {
+        await removeWalletFromDatabase(discordId);
+        console.log(`Removed stale wallet ${wallet} for Discord user ${discordId}: member no longer in guild.`);
+        continue;
+      }
+
       failed++;
       console.error(`Failed to refresh ${wallet} for Discord user ${discordId}:`, error);
     }
@@ -1384,20 +1372,29 @@ async function handleRaid(interaction) {
       flavor
     );
   }
+  const publicChannel =
+    interaction.guild.channels.cache.get(GENERAL_CHAT_CHANNEL_ID) ||
+    await interaction.guild.channels.fetch(GENERAL_CHAT_CHANNEL_ID).catch(() => null);
+
+  if (publicChannel?.isTextBased()) {
+    const publicFlavor = success
+      ? successMessages[Math.floor(Math.random() * successMessages.length)]
+      : failMessages[Math.floor(Math.random() * failMessages.length)];
+
+    const publicMessage = success
+      ? `💥 **CONVOY RAID SUCCESS!**\n\nRaider: **${member.displayName}**\nFaction: **${getFactionLabel(faction)}**\nConvoy ID: **${activeConvoy.id}**\n\n${publicFlavor}\n\n💰 Loot: **${reward} $NKFE**`
+      : `🛡️ **RAID FAILED!**\n\nRaider: **${member.displayName}**\nFaction: **${getFactionLabel(faction)}**\nConvoy ID: **${activeConvoy.id}**\n\n${publicFlavor}`;
+
+    try {
+      await publicChannel.send(publicMessage);
+    } catch (error) {
+      console.error("Failed to send public raid result:", error);
+    }
+  } else {
+    console.error(`Raid result channel ${GENERAL_CHAT_CHANNEL_ID} was not found or is not text-based.`);
+  }
 }
-const publicChannel = client.channels.cache.get(GENERAL_CHAT_CHANNEL_ID);
 
-if (publicChannel) {
-  const publicFlavor = success
-    ? successMessages[Math.floor(Math.random() * successMessages.length)]
-    : failMessages[Math.floor(Math.random() * failMessages.length)];
-
-  const publicMessage = success
-    ? `💥 **CONVOY RAID SUCCESS!**\n\nRaider: **${member.displayName}**\nFaction: **${getFactionLabel(faction)}**\nConvoy ID: **${activeConvoy.id}**\n\n${publicFlavor}\n\n💰 Loot: **${reward} $NKFE**`
-    : `🛡️ **RAID FAILED!**\n\nRaider: **${member.displayName}**\nFaction: **${getFactionLabel(faction)}**\nConvoy ID: **${activeConvoy.id}**\n\n${publicFlavor}`;
-
-  publicChannel.send(publicMessage);
-}
 async function buildRaidStatsMessage(discordId, displayName) {
   const wallet = await getVerifiedWallet(discordId);
   if (!wallet) return "No verified wallet found. Run `/verify wallet.wam` first.";
