@@ -1,6 +1,10 @@
 const VERIFIED_WALLET_ROLE_ID = "1498390601199255794";
 const LEADERBOARD_CHANNEL_ID = "1498090264734990497";
+<<<<<<< codex/fix-raid-result-posting-to-#nkf-general-aa2fvd
 const GENERAL_CHAT_CHANNEL_ID = "1498087642120851677";
+=======
+const GENERAL_CHAT_CHANNEL_ID = "872930746451513436";
+>>>>>>> main
 
 const WAX_CHAIN_API = "https://wax.greymass.com";
 const WAX_HISTORY_API = "https://api.waxsweden.org";
