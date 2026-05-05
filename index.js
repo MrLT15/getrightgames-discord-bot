@@ -212,6 +212,11 @@ async function saveWalletToDatabase(discordId, wallet) {
   verifiedWallets[discordId] = wallet;
 }
 
+async function removeWalletFromDatabase(discordId) {
+  await pool.query("DELETE FROM verified_wallets WHERE discord_id = $1", [discordId]);
+  delete verifiedWallets[discordId];
+}
+
 async function getVerifiedWallet(discordId) {
   const result = await pool.query("SELECT wallet FROM verified_wallets WHERE discord_id = $1", [discordId]);
   return result.rows[0]?.wallet || null;
@@ -878,6 +883,12 @@ async function refreshAllVerifiedWallets() {
       console.log(`Refreshed ${wallet} for Discord user ${discordId}`);
       await sleep(1500);
     } catch (error) {
+      if (error?.code === 10007 || error?.status === 404) {
+        await removeWalletFromDatabase(discordId);
+        console.log(`Removed stale wallet ${wallet} for Discord user ${discordId}: member no longer in guild.`);
+        continue;
+      }
+
       failed++;
       console.error(`Failed to refresh ${wallet} for Discord user ${discordId}:`, error);
     }
