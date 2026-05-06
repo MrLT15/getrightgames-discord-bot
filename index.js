@@ -4,7 +4,10 @@ const {
   REST,
   Routes,
   SlashCommandBuilder,
-  PermissionFlagsBits
+  PermissionFlagsBits,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle
 } = require("discord.js");
 
 // Node 18+ includes global fetch. Do not require node-fetch v3 from CommonJS.
@@ -47,7 +50,9 @@ let verifiedWallets = {};
 let scheduledRefreshRunning = false;
 let seenConvoyActionIds = new Set();
 let convoyTrackerInitialized = false;
-let activeConvoy = null;
+let activeConvoys = new Map();
+
+const RAID_BUTTON_PREFIX = "raid_convoy:";
 
 const pool = new Pool({
   connectionString: DATABASE_URL,
@@ -358,7 +363,7 @@ async function registerCommands() {
 
     new SlashCommandBuilder()
       .setName("raid")
-      .setDescription("Attempt to raid the active NiftyKicks convoy.")
+      .setDescription("Attempt to raid the newest active convoy. Use alert buttons to raid specific convoys.")
       .toJSON(),
 
     new SlashCommandBuilder()
@@ -1154,13 +1159,51 @@ async function fetchRecentConvoyActions() {
   return foundActions;
 }
 
-async function openRaidWindow({ route, convoyId, wallet, legendary }) {
+function buildRaidButtonRow(raidId, disabled = false) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`${RAID_BUTTON_PREFIX}${raidId}`)
+      .setLabel(disabled ? "Raid Window Closed" : "Raid This Convoy")
+      .setStyle(ButtonStyle.Danger)
+      .setDisabled(disabled)
+  );
+}
+
+function getActiveConvoy(raidId) {
+  const convoy = activeConvoys.get(String(raidId));
+  if (!convoy) return null;
+
+  if (Date.now() > convoy.expiresAt) {
+    activeConvoys.delete(String(raidId));
+    return null;
+  }
+
+  return convoy;
+}
+
+function getLatestActiveConvoy() {
+  let latestConvoy = null;
+
+  for (const convoy of activeConvoys.values()) {
+    if (Date.now() > convoy.expiresAt) {
+      activeConvoys.delete(convoy.id);
+      continue;
+    }
+
+    if (!latestConvoy || convoy.startedAt > latestConvoy.startedAt) latestConvoy = convoy;
+  }
+
+  return latestConvoy;
+}
+
+async function openRaidWindow({ route, convoyId, raidId, wallet, legendary }) {
   const guild = await client.guilds.fetch(GUILD_ID);
   const channel = guild.channels.cache.get(GENERAL_CHAT_CHANNEL_ID);
   if (!channel) return;
 
-  activeConvoy = {
-    id: String(convoyId),
+  const convoy = {
+    id: String(raidId),
+    displayId: String(convoyId),
     route: String(route),
     wallet: String(wallet),
     legendary: Boolean(legendary),
@@ -1168,37 +1211,45 @@ async function openRaidWindow({ route, convoyId, wallet, legendary }) {
     expiresAt: Date.now() + RAID_WINDOW_SECONDS * 1000,
     attemptedDiscordIds: new Set()
   };
+  activeConvoys.set(convoy.id, convoy);
 
-  if (legendary) {
-    await channel.send(
-      "🚨 **LEGENDARY CONVOY DETECTED!** 🚨\n\n" +
-      `Route / Mission: **${route}**
-` +
-      `Convoy ID: **${convoyId}**
+  const content = convoy.legendary
+    ? [
+        "🚨 **LEGENDARY CONVOY DETECTED!** 🚨",
+        "",
+        `Route / Mission: **${route}**`,
+        `Convoy ID: **${convoyId}**`,
+        "",
+        `Raid window: **${RAID_WINDOW_SECONDS} seconds**`,
+        "Potential loot: **25–75 $NKFE**",
+        "",
+        "Click the red button below to raid **this specific convoy**."
+      ].join("\n")
+    : [
+        "⚠️ **Convoy Raiders Alert!** ⚠️",
+        "",
+        `Route / Mission: **${route}**`,
+        `Convoy ID: **${convoyId}**`,
+        "",
+        `Raid window: **${RAID_WINDOW_SECONDS} seconds**`,
+        "Reward: **1–5 $NKFE**",
+        "",
+        "Click the red button below to raid **this specific convoy**."
+      ].join("\n");
 
-` +
-      `Raid window: **${RAID_WINDOW_SECONDS} seconds**
-` +
-      "Potential loot: **25–75 $NKFE**\n\n" +
-      "Verified wallets can run `/raid` now."
-    );
-  } else {
-    await channel.send(
-      "⚠️ **Convoy Raiders Alert!** ⚠️\n\n" +
-      `Route / Mission: **${route}**
-` +
-      `Convoy ID: **${convoyId}**
+  const raidMessage = await channel.send({
+    content,
+    components: [buildRaidButtonRow(convoy.id)]
+  });
 
-` +
-      `Raid window: **${RAID_WINDOW_SECONDS} seconds**
-` +
-      "Reward: **1–5 $NKFE**\n\n" +
-      "Verified wallets can run `/raid` now."
-    );
-  }
+  setTimeout(async () => {
+    activeConvoys.delete(convoy.id);
 
-  setTimeout(() => {
-    if (activeConvoy && activeConvoy.id === String(convoyId)) activeConvoy = null;
+    try {
+      await raidMessage.edit({ components: [buildRaidButtonRow(convoy.id, true)] });
+    } catch (error) {
+      console.log(`Could not disable raid button for convoy ${convoy.id}:`, error.message);
+    }
   }, RAID_WINDOW_SECONDS * 1000);
 }
 
@@ -1256,7 +1307,8 @@ async function postConvoyActivity(contract, actionName, action) {
   );
 
   const legendary = Math.random() < LEGENDARY_CONVOY_CHANCE;
-  await openRaidWindow({ route, convoyId: convoy, wallet, legendary });
+  const raidId = String(getActionId(action) || `${convoy}-${Date.now()}`);
+  await openRaidWindow({ route, convoyId: convoy, raidId, wallet, legendary });
 }
 
 async function checkConvoyActivity() {
@@ -1290,7 +1342,7 @@ async function checkConvoyActivity() {
   }
 }
 
-async function handleRaid(interaction) {
+async function handleRaid(interaction, raidId = null) {
   const member = await interaction.guild.members.fetch(interaction.user.id);
 
   if (!member.roles.cache.has(VERIFIED_WALLET_ROLE_ID)) {
@@ -1304,13 +1356,18 @@ async function handleRaid(interaction) {
     return;
   }
 
-  if (!activeConvoy || Date.now() > activeConvoy.expiresAt) {
-    await interaction.editReply("No active convoy raid window right now. Watch for the next convoy dispatch.");
+  const convoy = raidId ? getActiveConvoy(raidId) : getLatestActiveConvoy();
+  if (!convoy) {
+    await interaction.editReply(
+      raidId
+        ? "This convoy raid window has closed or is no longer available. Watch for the next convoy alert."
+        : "No active convoy raid window right now. Watch for the next convoy dispatch and click its red raid button."
+    );
     return;
   }
 
-  if (activeConvoy.attemptedDiscordIds.has(interaction.user.id)) {
-    await interaction.editReply("You already attempted to raid this convoy. Wait for the next one.");
+  if (convoy.attemptedDiscordIds.has(interaction.user.id)) {
+    await interaction.editReply("You already attempted to raid this convoy. Pick another active convoy alert or wait for the next one.");
     return;
   }
 
@@ -1318,24 +1375,24 @@ async function handleRaid(interaction) {
   const raiderProfile = await getRaiderProfile(interaction.user.id);
   const faction = raiderProfile?.faction || null;
 
-  activeConvoy.attemptedDiscordIds.add(interaction.user.id);
+  convoy.attemptedDiscordIds.add(interaction.user.id);
 
-  const successChance = activeConvoy.legendary ? LEGENDARY_RAID_SUCCESS_CHANCE : RAID_SUCCESS_CHANCE;
+  const successChance = convoy.legendary ? LEGENDARY_RAID_SUCCESS_CHANCE : RAID_SUCCESS_CHANCE;
   const success = Math.random() < successChance;
-  const reward = success ? rollNkfeReward(activeConvoy.legendary) : 0;
+  const reward = success ? rollNkfeReward(convoy.legendary) : 0;
 
   await recordRaid(
     interaction.user.id,
     wallet,
     faction,
-    activeConvoy.id,
-    activeConvoy.route,
-    activeConvoy.legendary,
+    convoy.id,
+    convoy.route,
+    convoy.legendary,
     success,
     reward
   );
 
-  const successMessages = activeConvoy.legendary
+  const successMessages = convoy.legendary
     ? [
         "You breached the legendary convoy and escaped with premium cargo.",
         "The legendary convoy took heavy damage. You got out with rare loot.",
@@ -1347,7 +1404,7 @@ async function handleRaid(interaction) {
         "Your raid crew moved fast and disappeared with the cargo."
       ];
 
-  const failMessages = activeConvoy.legendary
+  const failMessages = convoy.legendary
     ? [
         "The legendary convoy escort was too strong. Your crew was forced to retreat.",
         "Defense drones locked the route down. Raid failed.",
@@ -1361,37 +1418,30 @@ async function handleRaid(interaction) {
 
   if (success) {
     const flavor = successMessages[Math.floor(Math.random() * successMessages.length)];
-    await interaction.editReply(
-      "⚔️ **Raid Successful!**\n\n" +
-      `Raider: **${member.displayName}**
-` +
-      `Wallet: **${wallet}**
-` +
-      `Faction: **${getFactionLabel(faction)}**
-` +
-      `Convoy ID: **${activeConvoy.id}**
-
-` +
-      `${flavor}
-
-` +
+    await interaction.editReply([
+      "⚔️ **Raid Successful!**",
+      "",
+      `Raider: **${member.displayName}**`,
+      `Wallet: **${wallet}**`,
+      `Faction: **${getFactionLabel(faction)}**`,
+      `Convoy ID: **${convoy.displayId}**`,
+      "",
+      flavor,
+      "",
       `💰 Loot gained: **${reward} $NKFE**`
-    );
+    ].join("\n"));
   } else {
     const flavor = failMessages[Math.floor(Math.random() * failMessages.length)];
-    await interaction.editReply(
-      "🛡️ **Raid Failed!**\n\n" +
-      `Raider: **${member.displayName}**
-` +
-      `Wallet: **${wallet}**
-` +
-      `Faction: **${getFactionLabel(faction)}**
-` +
-      `Convoy ID: **${activeConvoy.id}**
-
-` +
+    await interaction.editReply([
+      "🛡️ **Raid Failed!**",
+      "",
+      `Raider: **${member.displayName}**`,
+      `Wallet: **${wallet}**`,
+      `Faction: **${getFactionLabel(faction)}**`,
+      `Convoy ID: **${convoy.displayId}**`,
+      "",
       flavor
-    );
+    ].join("\n"));
   }
   const publicChannel =
     interaction.guild.channels.cache.get(GENERAL_CHAT_CHANNEL_ID) ||
@@ -1403,8 +1453,22 @@ async function handleRaid(interaction) {
       : failMessages[Math.floor(Math.random() * failMessages.length)];
 
     const publicMessage = success
-      ? `💥 **CONVOY RAID SUCCESS!**\n\nRaider: **${member.displayName}**\nFaction: **${getFactionLabel(faction)}**\nConvoy ID: **${activeConvoy.id}**\n\n${publicFlavor}\n\n💰 Loot: **${reward} $NKFE**`
-      : `🛡️ **RAID FAILED!**\n\nRaider: **${member.displayName}**\nFaction: **${getFactionLabel(faction)}**\nConvoy ID: **${activeConvoy.id}**\n\n${publicFlavor}`;
+      ? `💥 **CONVOY RAID SUCCESS!**
+
+Raider: **${member.displayName}**
+Faction: **${getFactionLabel(faction)}**
+Convoy ID: **${convoy.displayId}**
+
+${publicFlavor}
+
+💰 Loot: **${reward} $NKFE**`
+      : `🛡️ **RAID FAILED!**
+
+Raider: **${member.displayName}**
+Faction: **${getFactionLabel(faction)}**
+Convoy ID: **${convoy.displayId}**
+
+${publicFlavor}`;
 
     try {
       await publicChannel.send(publicMessage);
@@ -1508,7 +1572,7 @@ client.on("guildMemberAdd", async member => {
 });
 
 client.on("interactionCreate", async interaction => {
-  if (!interaction.isChatInputCommand()) return;
+  if (!interaction.isChatInputCommand() && !interaction.isButton()) return;
 
   try {
     await interaction.deferReply({ flags: 64 });
@@ -1518,6 +1582,17 @@ client.on("interactionCreate", async interaction => {
   }
 
   try {
+    if (interaction.isButton()) {
+      if (!interaction.customId.startsWith(RAID_BUTTON_PREFIX)) {
+        await interaction.editReply("Unknown button interaction.");
+        return;
+      }
+
+      const raidId = interaction.customId.slice(RAID_BUTTON_PREFIX.length);
+      await handleRaid(interaction, raidId);
+      return;
+    }
+
     if (interaction.commandName === "stats") {
       const message = await buildStatsMessage(interaction.guild);
       await interaction.editReply(message);
