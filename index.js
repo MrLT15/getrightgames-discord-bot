@@ -41,19 +41,11 @@ const {
   createRankFeature
 } = require("./src/features/ranks");
 const { createRaidFeature } = require("./src/features/raids");
+const { createProfileFeature } = require("./src/features/profile");
 
 let verifiedWallets = {};
 let scheduledRefreshRunning = false;
 let tableReadWarningKeys = new Set();
-
-const PROFILE_BUTTON_PREFIX = "profile_action:";
-const PROFILE_ACTIONS = {
-  REFRESH: "refresh",
-  RANK: "rank",
-  RAID_STATS: "raidstats",
-  RAID_LEADERBOARD: "raidleaderboard",
-  RAID_FACTIONS: "raidfactions"
-};
 
 const pool = new Pool({
   connectionString: DATABASE_URL,
@@ -553,24 +545,22 @@ const raidFeature = createRaidFeature({
   sleep
 });
 
-function buildProfileActionButton(action, label, style = ButtonStyle.Secondary) {
-  return new ButtonBuilder()
-    .setCustomId(`${PROFILE_BUTTON_PREFIX}${action}`)
-    .setLabel(label)
-    .setStyle(style);
-}
-
-function buildProfileActionRows() {
-  return [
-    new ActionRowBuilder().addComponents(
-      buildProfileActionButton(PROFILE_ACTIONS.REFRESH, "Refresh Roles", ButtonStyle.Primary),
-      buildProfileActionButton(PROFILE_ACTIONS.RANK, "Rank"),
-      buildProfileActionButton(PROFILE_ACTIONS.RAID_STATS, "Raid Stats"),
-      buildProfileActionButton(PROFILE_ACTIONS.RAID_LEADERBOARD, "Raid Board"),
-      buildProfileActionButton(PROFILE_ACTIONS.RAID_FACTIONS, "Factions")
-    )
-  ];
-}
+const profileFeature = createProfileFeature({
+  roleRules: ROLE_RULES,
+  getVerifiedWallet,
+  getAllRoleAssets,
+  countTemplates,
+  countAssetsByTemplateMinLevel,
+  hasMachineSetAtLevel,
+  qualifiesForRule,
+  selectHighestGroupedRules,
+  ensureRaiderProfile,
+  getRaiderProfile,
+  processWalletByMember,
+  rankFeature,
+  raidFeature,
+  getFactionLabel
+});
 
 function dedupeCommandsByName(commands) {
   const uniqueCommands = [];
@@ -997,98 +987,6 @@ function selectHighestGroupedRules(qualified) {
   return [...final, ...Object.values(grouped)];
 }
 
-function buildProfileStats(assets, counts) {
-  return {
-    factoryTier9: countAssetsByTemplateMinLevel(assets, "708905", 9),
-    machinesTier9Complete: hasMachineSetAtLevel(assets, 9),
-    skillLaborerTier9: countAssetsByTemplateMinLevel(assets, "708902", 9),
-    techCenterTier3: countAssetsByTemplateMinLevel(assets, "768499", 3),
-    militaryTier4: countAssetsByTemplateMinLevel(assets, "711919", 4),
-    chronicleBooks: counts["776806"] || 0,
-    neonGenesisComplete: ["452006", "452005", "452004", "452003", "452002"]
-      .every(id => (counts[id] || 0) >= 1)
-  };
-}
-
-function buildProfileMessage(member, wallet, assetData, finalRules, counts, raidProfile = null, rankProfile = null) {
-  const assets = assetData.combinedAssets;
-  const stats = buildProfileStats(assets, counts);
-  const attempts = Number(raidProfile?.total_attempts || 0);
-  const successes = Number(raidProfile?.total_successes || 0);
-  const failedRaids = Math.max(attempts - successes, 0);
-  const successRate = attempts ? Math.round((successes / attempts) * 100) : 0;
-  const rankProgress = rankFeature.calculateRankProgress(rankProfile?.xp || 0);
-  const convoyPower = rankFeature.calculateConvoyPower(rankProfile?.xp || 0, raidProfile);
-
-  return [
-    "🏭 **NiftyKicks Factory Profile**",
-    "",
-    `**Player:** ${member.displayName}`,
-    `**Wallet:** ${wallet}`,
-    `**Faction:** ${getFactionLabel(raidProfile?.faction)}`,
-    "",
-    "🎖️ **Convoy Command Rank**",
-    `Rank: **${rankFeature.formatRank(rankProgress.currentRank)}**`,
-    rankProgress.nextRank
-      ? `XP: **${rankProfile?.xp || 0} / ${rankProgress.nextRank.xp}** (${rankProgress.progressPercent}%)`
-      : `XP: **${rankProfile?.xp || 0}** (Max Rank)`,
-    rankProgress.nextRank ? `Next Rank: **${rankFeature.formatRank(rankProgress.nextRank)}**` : "Next Rank: **None — top of command**",
-    `Convoy Power: **${convoyPower}**`,
-    "",
-    "**Convoy Raider Snapshot**",
-    `Raid Attempts: **${attempts}**`,
-    `Successful Raids: **${successes}**`,
-    `Failed Raids: **${failedRaids}**`,
-    `Success Rate: **${successRate}%**`,
-    `This Week's Raid Earnings: **${raidProfile?.weekly_nkfe || 0} $NKFE**`,
-    `Lifetime NKFE Earned: **${raidProfile?.lifetime_nkfe || 0} $NKFE**`,
-    `Current Payout Balance: **${raidProfile?.payout_nkfe || 0} $NKFE**`,
-    `Legendary Convoy Wins: **${raidProfile?.legendary_successes || 0}**`,
-    "",
-    "**Assets Evaluated**",
-    `Wallet NFTs: **${assetData.walletAssets.length}**`,
-    `Staked NFTs: **${assetData.stakedAssets.length}**`,
-    `Total Evaluated: **${assetData.combinedAssets.length}**`,
-    "",
-    "**Progression Snapshot**",
-    `🏭 Factories Tier 9: **${stats.factoryTier9}**`,
-    `⚙️ Machine Set Tier 9 Complete: **${stats.machinesTier9Complete ? "Yes" : "No"}**`,
-    `👷 Skill Laborers Tier 9: **${stats.skillLaborerTier9}**`,
-    `🧠 Tech Centers Tier 3: **${stats.techCenterTier3}**`,
-    `🔥 Military Facilities Tier 4: **${stats.militaryTier4}**`,
-    `📖 Chronicle Books: **${stats.chronicleBooks}**`,
-    `🌟 Neon Genesis Set Complete: **${stats.neonGenesisComplete ? "Yes" : "No"}**`,
-    "",
-    "**Current NFT Roles**",
-    finalRules.length ? finalRules.map(r => r.name).join("\n") : "None",
-    "",
-    "Use the buttons below to refresh roles or jump into raid/faction views."
-  ].join("\n");
-}
-
-async function getProfileForMember(member, wallet) {
-  await ensureRaiderProfile(member.id, wallet);
-  await rankFeature.ensureRankProfile(member.id, wallet);
-
-  const assetData = await getAllRoleAssets(wallet);
-  const raidProfile = await getRaiderProfile(member.id);
-  const rankProfile = await rankFeature.getRankProfile(member.id);
-  const assets = assetData.combinedAssets;
-  const counts = countTemplates(assets);
-  const qualified = ROLE_RULES.filter(rule => qualifiesForRule(rule, assets, counts));
-  const finalRules = selectHighestGroupedRules(qualified);
-
-  return buildProfileMessage(member, wallet, assetData, finalRules, counts, raidProfile, rankProfile);
-}
-
-async function buildProfileReplyOptions(member, wallet) {
-  const content = await getProfileForMember(member, wallet);
-  return {
-    content,
-    components: buildProfileActionRows()
-  };
-}
-
 async function announceMilestones(guild, member, addedRoleIds) {
   const channel = guild.channels.cache.get(LEADERBOARD_CHANNEL_ID);
   if (!channel) return;
@@ -1285,127 +1183,6 @@ async function postDailyLeaderboard() {
   }
 }
 
-async function handleProfileAction(interaction, action) {
-  const wallet = await getVerifiedWallet(interaction.user.id);
-  if (!wallet) {
-    await interaction.editReply("No wallet found for you yet. Please run `/verify yourwallet.wam` first.");
-    return;
-  }
-
-  const member = await interaction.guild.members.fetch(interaction.user.id);
-
-  if (action === PROFILE_ACTIONS.REFRESH) {
-    await processWalletByMember(interaction.guild, member, wallet, false, true);
-    await interaction.editReply(await buildProfileReplyOptions(member, wallet));
-    return;
-  }
-
-  if (action === PROFILE_ACTIONS.RANK) {
-    await interaction.editReply(await rankFeature.buildRankMessage(interaction.user.id, member.displayName));
-    return;
-  }
-
-  if (action === PROFILE_ACTIONS.RAID_STATS) {
-    await interaction.editReply(await raidFeature.buildRaidStatsMessage(interaction.user.id, member.displayName));
-    return;
-  }
-
-  if (action === PROFILE_ACTIONS.RAID_LEADERBOARD) {
-    await raidFeature.sendRaidLeaderboard(interaction);
-    return;
-  }
-
-  if (action === PROFILE_ACTIONS.RAID_FACTIONS) {
-    await raidFeature.sendRaidFactions(interaction);
-    return;
-  }
-
-  await interaction.editReply("Unknown profile action.");
-}
-
-async function sendRaidLeaderboard(interaction) {
-  const result = await pool.query(`
-    SELECT discord_id, wallet, faction, weekly_nkfe, weekly_successes, weekly_attempts, lifetime_nkfe
-    FROM raid_balances
-    ORDER BY weekly_nkfe DESC, weekly_successes DESC, weekly_attempts DESC
-    LIMIT 10
-  `);
-
-  if (!result.rows.length) {
-    await interaction.editReply("No Convoy Raiders leaderboard data yet.");
-    return;
-  }
-
-  const lines = result.rows.map((row, index) =>
-    `${index + 1}. <@${row.discord_id}> — **${row.weekly_nkfe} NKFE this week** | ${row.weekly_successes}/${row.weekly_attempts} successful | Lifetime: ${row.lifetime_nkfe} NKFE | ${getFactionLabel(row.faction)}`
-  );
-
-  await interaction.editReply("🏆 **Weekly Convoy Raiders Leaderboard**\n\n" + lines.join("\n"));
-}
-
-async function sendRaidFactions(interaction) {
-  const result = await pool.query(`
-    SELECT faction,
-           COUNT(DISTINCT discord_id) AS active_members,
-           SUM(weekly_nkfe) AS total_nkfe,
-           SUM(weekly_successes) AS successes,
-           SUM(weekly_attempts) AS attempts
-    FROM raid_balances
-    WHERE faction IS NOT NULL AND weekly_attempts > 0
-    GROUP BY faction
-    ORDER BY total_nkfe DESC, successes DESC
-  `);
-
-  if (!result.rows.length) {
-    await interaction.editReply("No faction raid data yet. Use `/joinfaction` to join a faction.");
-    return;
-  }
-
-  const lines = result.rows.map((row, index) =>
-    `${index + 1}. **${getFactionLabel(row.faction)}** — **${row.total_nkfe || 0} NKFE this week** | ${row.successes || 0}/${row.attempts || 0} successful | Active raiders: ${row.active_members}`
-  );
-
-  await interaction.editReply("🏴 **Convoy Raiders Faction Standings**\n\n" + lines.join("\n"));
-}
-
-async function handleProfileAction(interaction, action) {
-  const wallet = await getVerifiedWallet(interaction.user.id);
-  if (!wallet) {
-    await interaction.editReply("No wallet found for you yet. Please run `/verify yourwallet.wam` first.");
-    return;
-  }
-
-  const member = await interaction.guild.members.fetch(interaction.user.id);
-
-  if (action === PROFILE_ACTIONS.REFRESH) {
-    await processWalletByMember(interaction.guild, member, wallet, false, true);
-    await interaction.editReply(await buildProfileReplyOptions(member, wallet));
-    return;
-  }
-
-  if (action === PROFILE_ACTIONS.RANK) {
-    await interaction.editReply(await rankFeature.buildRankMessage(interaction.user.id, member.displayName));
-    return;
-  }
-
-  if (action === PROFILE_ACTIONS.RAID_STATS) {
-    await interaction.editReply(await buildRaidStatsMessage(interaction.user.id, member.displayName));
-    return;
-  }
-
-  if (action === PROFILE_ACTIONS.RAID_LEADERBOARD) {
-    await sendRaidLeaderboard(interaction);
-    return;
-  }
-
-  if (action === PROFILE_ACTIONS.RAID_FACTIONS) {
-    await sendRaidFactions(interaction);
-    return;
-  }
-
-  await interaction.editReply("Unknown profile action.");
-}
-
 client.once("clientReady", async () => {
   console.log(`Logged in as ${client.user.tag}`);
 
@@ -1480,9 +1257,9 @@ client.on("interactionCreate", async interaction => {
         return;
       }
 
-      if (interaction.customId.startsWith(PROFILE_BUTTON_PREFIX)) {
-        const action = interaction.customId.slice(PROFILE_BUTTON_PREFIX.length);
-        await handleProfileAction(interaction, action);
+      if (profileFeature.isProfileButton(interaction.customId)) {
+        const action = profileFeature.getProfileActionFromButton(interaction.customId);
+        await profileFeature.handleProfileAction(interaction, action);
         return;
       }
 
@@ -1536,7 +1313,7 @@ client.on("interactionCreate", async interaction => {
         return;
       }
       const member = await interaction.guild.members.fetch(interaction.user.id);
-      await interaction.editReply(await buildProfileReplyOptions(member, wallet));
+      await interaction.editReply(await profileFeature.buildProfileReplyOptions(member, wallet));
       return;
     }
 
