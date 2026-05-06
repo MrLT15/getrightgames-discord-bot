@@ -51,6 +51,7 @@ let scheduledRefreshRunning = false;
 let seenConvoyActionIds = new Set();
 let convoyTrackerInitialized = false;
 let activeConvoys = new Map();
+let tableReadWarningKeys = new Set();
 
 const RAID_BUTTON_PREFIX = "raid_convoy:";
 const PROFILE_BUTTON_PREFIX = "profile_action:";
@@ -189,6 +190,14 @@ function sleep(ms) {
 function cleanValue(value, fallback = "Unknown") {
   if (value === undefined || value === null || value === "") return fallback;
   return String(value);
+}
+
+function logTableReadWarning(code, table, reason, prefix = "Skipping table") {
+  const warningKey = `${prefix}:${code}.${table}:${reason}`;
+  if (tableReadWarningKeys.has(warningKey)) return;
+
+  tableReadWarningKeys.add(warningKey);
+  console.log(`${prefix} ${code}.${table}: ${reason}`);
 }
 
 async function initDatabase() {
@@ -768,7 +777,7 @@ async function getTableRows({ code, table, lowerBound = null, upperBound = null,
       const json = await response.json();
 
       if (!response.ok || json.error) {
-        console.log(`Skipping table ${code}.${table}:`, json.error?.what || json.message || "Unknown table error");
+        logTableReadWarning(code, table, json.error?.what || json.message || "Unknown table error");
         break;
       }
 
@@ -779,7 +788,7 @@ async function getTableRows({ code, table, lowerBound = null, upperBound = null,
       nextKey = json.next_key || json.next_key === "" ? json.next_key : null;
       if (!nextKey) break;
     } catch (error) {
-      console.log(`Failed to read table ${code}.${table}:`, error.message);
+      logTableReadWarning(code, table, error.message, "Failed to read table");
       break;
     }
   }
