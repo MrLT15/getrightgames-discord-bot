@@ -114,6 +114,50 @@ const ROLE_RULES = [
   { type: "founder_empire", name: "🏛 Founder_of_the_NiftyKicks_Empire", roleId: "1497998180623585531" }
 ];
 
+const RANKS = [
+  { level: 1, name: "Private", abbreviation: "PVT", xp: 0 },
+  { level: 2, name: "Private", abbreviation: "PV2", xp: 250 },
+  { level: 3, name: "Private First Class", abbreviation: "PFC", xp: 750 },
+  { level: 4, name: "Specialist", abbreviation: "SPC", xp: 1500 },
+  { level: 5, name: "Corporal", abbreviation: "CPL", xp: 2500 },
+  { level: 6, name: "Sergeant", abbreviation: "SGT", xp: 4000 },
+  { level: 7, name: "Staff Sergeant", abbreviation: "SSG", xp: 6000 },
+  { level: 8, name: "Sergeant First Class", abbreviation: "SFC", xp: 8500 },
+  { level: 9, name: "Master Sergeant", abbreviation: "MSG", xp: 12000 },
+  { level: 10, name: "First Sergeant", abbreviation: "1SG", xp: 16000 },
+  { level: 11, name: "Sergeant Major", abbreviation: "SGM", xp: 22000 },
+  { level: 12, name: "Command Sergeant Major", abbreviation: "CSM", xp: 30000 },
+  { level: 13, name: "Sergeant Major of the Army", abbreviation: "SMA", xp: 40000 },
+  { level: 14, name: "Warrant Officer 1", abbreviation: "WO1", xp: 52000 },
+  { level: 15, name: "Chief Warrant Officer 2", abbreviation: "CW2", xp: 66000 },
+  { level: 16, name: "Chief Warrant Officer 3", abbreviation: "CW3", xp: 82000 },
+  { level: 17, name: "Chief Warrant Officer 4", abbreviation: "CW4", xp: 100000 },
+  { level: 18, name: "Chief Warrant Officer 5", abbreviation: "CW5", xp: 122000 },
+  { level: 19, name: "Second Lieutenant", abbreviation: "2LT", xp: 150000 },
+  { level: 20, name: "First Lieutenant", abbreviation: "1LT", xp: 185000 },
+  { level: 21, name: "Captain", abbreviation: "CPT", xp: 230000 },
+  { level: 22, name: "Major", abbreviation: "MAJ", xp: 285000 },
+  { level: 23, name: "Lieutenant Colonel", abbreviation: "LTC", xp: 350000 },
+  { level: 24, name: "Colonel", abbreviation: "COL", xp: 430000 },
+  { level: 25, name: "Brigadier General", abbreviation: "BG", xp: 525000 },
+  { level: 26, name: "Major General", abbreviation: "MG", xp: 650000 },
+  { level: 27, name: "Lieutenant General", abbreviation: "LTG", xp: 800000 },
+  { level: 28, name: "General", abbreviation: "GEN", xp: 1000000 },
+  { level: 29, name: "General of the Army", abbreviation: "GA", xp: 1250000 }
+];
+
+const RANK_XP_REWARDS = {
+  ATTEMPT: 5,
+  SUCCESS: 50,
+  LEGENDARY_SUCCESS: 150
+};
+
+const RANK_WEEKLY_XP_CAPS = {
+  ATTEMPT: 1000,
+  SUCCESS: 5000,
+  LEGENDARY: 3000
+};
+
 const MILESTONE_ROLES = {
   "1497998180623585531": {
     title: "🏛 Founder of the NiftyKicks Empire",
