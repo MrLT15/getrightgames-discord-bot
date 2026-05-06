@@ -45,6 +45,11 @@ const {
   MIN_FACTION_SUCCESSFUL_RAIDS,
   RAIDER_FACTIONS
 } = require("./src/config/constants");
+const {
+  rankCommands,
+  initRankSchema,
+  createRankFeature
+} = require("./src/features/ranks");
 
 let verifiedWallets = {};
 let scheduledRefreshRunning = false;
@@ -246,50 +251,7 @@ async function initDatabase() {
     );
   `);
 
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS raid_ranks (
-      discord_id TEXT PRIMARY KEY,
-      wallet TEXT NOT NULL,
-      xp INTEGER NOT NULL DEFAULT 0,
-      weekly_xp INTEGER NOT NULL DEFAULT 0,
-      weekly_attempt_xp INTEGER NOT NULL DEFAULT 0,
-      weekly_success_xp INTEGER NOT NULL DEFAULT 0,
-      weekly_legendary_xp INTEGER NOT NULL DEFAULT 0,
-      weekly_bonus_xp INTEGER NOT NULL DEFAULT 0,
-      weekly_xp_week_start DATE NOT NULL DEFAULT CURRENT_DATE,
-      current_rank_level INTEGER NOT NULL DEFAULT 1,
-      best_rank_level INTEGER NOT NULL DEFAULT 1,
-      convoy_power INTEGER NOT NULL DEFAULT 0,
-      updated_at TIMESTAMPTZ DEFAULT NOW()
-    );
-  `);
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS raid_xp_logs (
-      id SERIAL PRIMARY KEY,
-      discord_id TEXT NOT NULL,
-      wallet TEXT NOT NULL,
-      convoy_id TEXT,
-      xp_source TEXT NOT NULL,
-      xp_amount INTEGER NOT NULL,
-      rank_before INTEGER NOT NULL,
-      rank_after INTEGER NOT NULL,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    );
-  `);
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS rank_promotion_logs (
-      id SERIAL PRIMARY KEY,
-      discord_id TEXT NOT NULL,
-      wallet TEXT NOT NULL,
-      old_rank_level INTEGER NOT NULL,
-      new_rank_level INTEGER NOT NULL,
-      old_rank_name TEXT NOT NULL,
-      new_rank_name TEXT NOT NULL,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    );
-  `);
+  await initRankSchema(pool);
 
   await pool.query(`ALTER TABLE raid_balances ADD COLUMN IF NOT EXISTS faction TEXT;`);
   await pool.query(`ALTER TABLE raid_balances ADD COLUMN IF NOT EXISTS payout_nkfe INTEGER NOT NULL DEFAULT 0;`);
@@ -302,9 +264,6 @@ async function initDatabase() {
   await pool.query(`ALTER TABLE raid_balances ADD COLUMN IF NOT EXISTS weekly_attempts INTEGER NOT NULL DEFAULT 0;`);
   await pool.query(`ALTER TABLE raid_balances ADD COLUMN IF NOT EXISTS weekly_legendary_successes INTEGER NOT NULL DEFAULT 0;`);
 
-  await pool.query(`ALTER TABLE raid_ranks ADD COLUMN IF NOT EXISTS weekly_bonus_xp INTEGER NOT NULL DEFAULT 0;`);
-  await pool.query(`ALTER TABLE raid_ranks ADD COLUMN IF NOT EXISTS weekly_xp_week_start DATE NOT NULL DEFAULT CURRENT_DATE;`);
-  await pool.query(`ALTER TABLE raid_ranks ADD COLUMN IF NOT EXISTS convoy_power INTEGER NOT NULL DEFAULT 0;`);
 }
 
 async function loadWalletsFromDatabase() {
@@ -603,6 +562,14 @@ function getFactionLabel(factionKey) {
   return `${faction.emoji} ${faction.name}`;
 }
 
+const rankFeature = createRankFeature({
+  pool,
+  getVerifiedWallet,
+  ensureRaiderProfile,
+  getRaiderProfile,
+  getFactionLabel
+});
+
 function buildProfileActionButton(action, label, style = ButtonStyle.Secondary) {
   return new ButtonBuilder()
     .setCustomId(`${PROFILE_BUTTON_PREFIX}${action}`)
@@ -649,6 +616,8 @@ async function registerCommands() {
       .setName("profile")
       .setDescription("Show your NiftyKicks Factory NFT profile.")
       .toJSON(),
+
+    ...rankCommands,
 
     new SlashCommandBuilder()
       .setName("rank")
@@ -1061,8 +1030,8 @@ function buildProfileMessage(member, wallet, assetData, finalRules, counts, raid
   const successes = Number(raidProfile?.total_successes || 0);
   const failedRaids = Math.max(attempts - successes, 0);
   const successRate = attempts ? Math.round((successes / attempts) * 100) : 0;
-  const rankProgress = calculateRankProgress(rankProfile?.xp || 0);
-  const convoyPower = calculateConvoyPower(rankProfile?.xp || 0, raidProfile);
+  const rankProgress = rankFeature.calculateRankProgress(rankProfile?.xp || 0);
+  const convoyPower = rankFeature.calculateConvoyPower(rankProfile?.xp || 0, raidProfile);
 
   return [
     "🏭 **NiftyKicks Factory Profile**",
@@ -1072,11 +1041,11 @@ function buildProfileMessage(member, wallet, assetData, finalRules, counts, raid
     `**Faction:** ${getFactionLabel(raidProfile?.faction)}`,
     "",
     "🎖️ **Convoy Command Rank**",
-    `Rank: **${formatRank(rankProgress.currentRank)}**`,
+    `Rank: **${rankFeature.formatRank(rankProgress.currentRank)}**`,
     rankProgress.nextRank
       ? `XP: **${rankProfile?.xp || 0} / ${rankProgress.nextRank.xp}** (${rankProgress.progressPercent}%)`
       : `XP: **${rankProfile?.xp || 0}** (Max Rank)`,
-    rankProgress.nextRank ? `Next Rank: **${formatRank(rankProgress.nextRank)}**` : "Next Rank: **None — top of command**",
+    rankProgress.nextRank ? `Next Rank: **${rankFeature.formatRank(rankProgress.nextRank)}**` : "Next Rank: **None — top of command**",
     `Convoy Power: **${convoyPower}**`,
     "",
     "**Convoy Raider Snapshot**",
@@ -1112,11 +1081,11 @@ function buildProfileMessage(member, wallet, assetData, finalRules, counts, raid
 
 async function getProfileForMember(member, wallet) {
   await ensureRaiderProfile(member.id, wallet);
-  await ensureRankProfile(member.id, wallet);
+  await rankFeature.ensureRankProfile(member.id, wallet);
 
   const assetData = await getAllRoleAssets(wallet);
   const raidProfile = await getRaiderProfile(member.id);
-  const rankProfile = await getRankProfile(member.id);
+  const rankProfile = await rankFeature.getRankProfile(member.id);
   const assets = assetData.combinedAssets;
   const counts = countTemplates(assets);
   const qualified = ROLE_RULES.filter(rule => qualifiesForRule(rule, assets, counts));
@@ -1748,7 +1717,7 @@ async function handleRaid(interaction, raidId = null) {
     reward
   );
 
-  const rankAward = await awardRankXp(interaction.user.id, wallet, convoy.id, convoy.legendary, success);
+  const rankAward = await rankFeature.awardRankXp(interaction.user.id, wallet, convoy.id, convoy.legendary, success);
 
   convoy.attempts++;
   if (success) convoy.successes++;
@@ -1792,7 +1761,7 @@ async function handleRaid(interaction, raidId = null) {
       "",
       `💰 Loot gained: **${reward} $NKFE**`,
       `🎖️ Rank XP gained: **${rankAward.xpAwarded} XP**`,
-      rankAward.promoted ? `⬆️ Promotion: **${formatRank(rankAward.rankAfter)}**` : `Rank: **${formatRank(rankAward.rankAfter)}**`
+      rankAward.promoted ? `⬆️ Promotion: **${rankFeature.formatRank(rankAward.rankAfter)}**` : `Rank: **${rankFeature.formatRank(rankAward.rankAfter)}**`
     ].join("\n"));
   } else {
     const flavor = failMessages[Math.floor(Math.random() * failMessages.length)];
@@ -1807,7 +1776,7 @@ async function handleRaid(interaction, raidId = null) {
       flavor,
       "",
       `🎖️ Rank XP gained: **${rankAward.xpAwarded} XP**`,
-      rankAward.promoted ? `⬆️ Promotion: **${formatRank(rankAward.rankAfter)}**` : `Rank: **${formatRank(rankAward.rankAfter)}**`
+      rankAward.promoted ? `⬆️ Promotion: **${rankFeature.formatRank(rankAward.rankAfter)}**` : `Rank: **${rankFeature.formatRank(rankAward.rankAfter)}**`
     ].join("\n"));
   }
   const publicChannel =
@@ -1885,99 +1854,6 @@ async function buildRaidStatsMessage(discordId, displayName) {
   );
 }
 
-async function buildRankMessage(discordId, displayName) {
-  const wallet = await getVerifiedWallet(discordId);
-  if (!wallet) return "No verified wallet found. Run `/verify wallet.wam` first.";
-
-  await ensureRaiderProfile(discordId, wallet);
-  await ensureRankProfile(discordId, wallet);
-  const [rankProfile, raidProfile] = await Promise.all([
-    getRankProfile(discordId),
-    getRaiderProfile(discordId)
-  ]);
-  const progress = calculateRankProgress(rankProfile?.xp || 0);
-  const attempts = Number(raidProfile?.total_attempts || 0);
-  const successes = Number(raidProfile?.total_successes || 0);
-  const successRate = attempts ? Math.round((successes / attempts) * 100) : 0;
-  const convoyPower = calculateConvoyPower(rankProfile?.xp || 0, raidProfile);
-
-  return [
-    "🎖️ **Convoy Command Rank**",
-    "",
-    `Player: **${displayName}**`,
-    `Wallet: **${wallet}**`,
-    `Faction: **${getFactionLabel(raidProfile?.faction)}**`,
-    "",
-    `Rank: **${formatRank(progress.currentRank)}**`,
-    progress.nextRank
-      ? `XP: **${rankProfile?.xp || 0} / ${progress.nextRank.xp}** (${progress.progressPercent}%)`
-      : `XP: **${rankProfile?.xp || 0}** (Max Rank)`,
-    progress.nextRank ? `Next Rank: **${formatRank(progress.nextRank)}**` : "Next Rank: **None — top of command**",
-    `Convoy Power: **${convoyPower}**`,
-    "",
-    "**Raid Record**",
-    `Attempts: **${attempts}**`,
-    `Successful Raids: **${successes}**`,
-    `Failed Raids: **${Math.max(attempts - successes, 0)}**`,
-    `Success Rate: **${successRate}%**`,
-    `Legendary Wins: **${raidProfile?.legendary_successes || 0}**`,
-    "",
-    "**Weekly XP Caps**",
-    `Attempt XP: **${rankProfile?.weekly_attempt_xp || 0} / ${RANK_WEEKLY_XP_CAPS.ATTEMPT}**`,
-    `Success XP: **${rankProfile?.weekly_success_xp || 0} / ${RANK_WEEKLY_XP_CAPS.SUCCESS}**`,
-    `Legendary XP: **${rankProfile?.weekly_legendary_xp || 0} / ${RANK_WEEKLY_XP_CAPS.LEGENDARY}**`
-  ].join("\n");
-}
-
-async function sendRankLeaderboard(interaction) {
-  const result = await pool.query(`
-    SELECT discord_id, wallet, xp, convoy_power, current_rank_level
-    FROM raid_ranks
-    WHERE xp > 0
-    ORDER BY xp DESC, convoy_power DESC
-    LIMIT 10
-  `);
-
-  if (!result.rows.length) {
-    await interaction.editReply("No Convoy Command rank data yet. Raid a convoy to earn XP.");
-    return;
-  }
-
-  const lines = result.rows.map((row, index) => {
-    const rank = getRankByLevel(row.current_rank_level);
-    return `${index + 1}. <@${row.discord_id}> — **${formatRank(rank)}** | ${row.xp} XP | Power: ${row.convoy_power}`;
-  });
-
-  await interaction.editReply("🏆 **Convoy Command XP Leaderboard**\n\n" + lines.join("\n"));
-}
-
-function buildRankRewardsMessage() {
-  return [
-    "🎖️ **Convoy Command Rank Rewards & XP Rules**",
-    "",
-    "**XP Sources**",
-    `Raid attempt: **${RANK_XP_REWARDS.ATTEMPT} XP**`,
-    `Successful normal raid: **+${RANK_XP_REWARDS.SUCCESS} XP**`,
-    `Successful legendary raid: **+${RANK_XP_REWARDS.LEGENDARY_SUCCESS} XP**`,
-    "",
-    "**Weekly XP Caps**",
-    `Attempt XP cap: **${RANK_WEEKLY_XP_CAPS.ATTEMPT} XP**`,
-    `Normal success XP cap: **${RANK_WEEKLY_XP_CAPS.SUCCESS} XP**`,
-    `Legendary success XP cap: **${RANK_WEEKLY_XP_CAPS.LEGENDARY} XP**`,
-    "",
-    "**Rank Milestones**",
-    "Sergeant: first major promotion shoutout tier",
-    "Sergeant Major: senior enlisted prestige",
-    "Warrant Officer 1: technical raider tier",
-    "Second Lieutenant: officer corps entry",
-    "Colonel: high command prestige",
-    "General: elite command status",
-    "General of the Army: five-star long-term grind",
-    "",
-    "XP is earned through convoy raiding power only. It is not NKFE and cannot be bought, sold, or converted."
-  ].join("\n");
-}
-
 async function sendRaidLeaderboard(interaction) {
   const result = await pool.query(`
     SELECT discord_id, wallet, faction, weekly_nkfe, weekly_successes, weekly_attempts, lifetime_nkfe
@@ -2039,7 +1915,7 @@ async function handleProfileAction(interaction, action) {
   }
 
   if (action === PROFILE_ACTIONS.RANK) {
-    await interaction.editReply(await buildRankMessage(interaction.user.id, member.displayName));
+    await interaction.editReply(await rankFeature.buildRankMessage(interaction.user.id, member.displayName));
     return;
   }
 
@@ -2159,17 +2035,17 @@ client.on("interactionCreate", async interaction => {
 
     if (interaction.commandName === "rank") {
       const member = await interaction.guild.members.fetch(interaction.user.id);
-      await interaction.editReply(await buildRankMessage(interaction.user.id, member.displayName));
+      await interaction.editReply(await rankFeature.buildRankMessage(interaction.user.id, member.displayName));
       return;
     }
 
     if (interaction.commandName === "rankleaderboard") {
-      await sendRankLeaderboard(interaction);
+      await rankFeature.sendRankLeaderboard(interaction);
       return;
     }
 
     if (interaction.commandName === "rankrewards") {
-      await interaction.editReply(buildRankRewardsMessage());
+      await interaction.editReply(rankFeature.buildRankRewardsMessage());
       return;
     }
 
