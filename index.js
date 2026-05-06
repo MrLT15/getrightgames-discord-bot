@@ -56,9 +56,7 @@ const RAID_BUTTON_PREFIX = "raid_convoy:";
 const PROFILE_BUTTON_PREFIX = "profile_action:";
 const PROFILE_ACTIONS = {
   REFRESH: "refresh",
-
   RANK: "rank",
-
   RAID_STATS: "raidstats",
   RAID_LEADERBOARD: "raidleaderboard",
   RAID_FACTIONS: "raidfactions"
@@ -607,9 +605,7 @@ function buildProfileActionRows() {
   return [
     new ActionRowBuilder().addComponents(
       buildProfileActionButton(PROFILE_ACTIONS.REFRESH, "Refresh Roles", ButtonStyle.Primary),
-
       buildProfileActionButton(PROFILE_ACTIONS.RANK, "Rank"),
-
       buildProfileActionButton(PROFILE_ACTIONS.RAID_STATS, "Raid Stats"),
       buildProfileActionButton(PROFILE_ACTIONS.RAID_LEADERBOARD, "Raid Board"),
       buildProfileActionButton(PROFILE_ACTIONS.RAID_FACTIONS, "Factions")
@@ -1049,18 +1045,13 @@ function buildProfileStats(assets, counts) {
   };
 }
 
-
 function buildProfileMessage(member, wallet, assetData, finalRules, counts, raidProfile = null, rankProfile = null) {
-
-function buildProfileMessage(member, wallet, assetData, finalRules, counts, raidProfile = null) {
-
   const assets = assetData.combinedAssets;
   const stats = buildProfileStats(assets, counts);
   const attempts = Number(raidProfile?.total_attempts || 0);
   const successes = Number(raidProfile?.total_successes || 0);
   const failedRaids = Math.max(attempts - successes, 0);
   const successRate = attempts ? Math.round((successes / attempts) * 100) : 0;
-
   const rankProgress = calculateRankProgress(rankProfile?.xp || 0);
   const convoyPower = calculateConvoyPower(rankProfile?.xp || 0, raidProfile);
 
@@ -1071,7 +1062,6 @@ function buildProfileMessage(member, wallet, assetData, finalRules, counts, raid
     `**Wallet:** ${wallet}`,
     `**Faction:** ${getFactionLabel(raidProfile?.faction)}`,
     "",
-
     "🎖️ **Convoy Command Rank**",
     `Rank: **${formatRank(rankProgress.currentRank)}**`,
     rankProgress.nextRank
@@ -1080,7 +1070,6 @@ function buildProfileMessage(member, wallet, assetData, finalRules, counts, raid
     rankProgress.nextRank ? `Next Rank: **${formatRank(rankProgress.nextRank)}**` : "Next Rank: **None — top of command**",
     `Convoy Power: **${convoyPower}**`,
     "",
-
     "**Convoy Raider Snapshot**",
     `Raid Attempts: **${attempts}**`,
     `Successful Raids: **${successes}**`,
@@ -1114,32 +1103,23 @@ function buildProfileMessage(member, wallet, assetData, finalRules, counts, raid
 
 async function getProfileForMember(member, wallet) {
   await ensureRaiderProfile(member.id, wallet);
-
   await ensureRankProfile(member.id, wallet);
-  const [assetData, raidProfile, rankProfile] = await Promise.all([
-    getAllRoleAssets(wallet),
-    getRaiderProfile(member.id),
-    getRankProfile(member.id)
 
-  const [assetData, raidProfile] = await Promise.all([
-    getAllRoleAssets(wallet),
-    getRaiderProfile(member.id)
-
-  ]);
+  const assetData = await getAllRoleAssets(wallet);
+  const raidProfile = await getRaiderProfile(member.id);
+  const rankProfile = await getRankProfile(member.id);
   const assets = assetData.combinedAssets;
   const counts = countTemplates(assets);
   const qualified = ROLE_RULES.filter(rule => qualifiesForRule(rule, assets, counts));
   const finalRules = selectHighestGroupedRules(qualified);
 
   return buildProfileMessage(member, wallet, assetData, finalRules, counts, raidProfile, rankProfile);
-
-  return buildProfileMessage(member, wallet, assetData, finalRules, counts, raidProfile);
-
 }
 
 async function buildProfileReplyOptions(member, wallet) {
+  const content = await getProfileForMember(member, wallet);
   return {
-    content: await getProfileForMember(member, wallet),
+    content,
     components: buildProfileActionRows()
   };
 }
@@ -1481,7 +1461,6 @@ async function fetchRecentConvoyActions() {
         const response = await fetch(url);
         const json = await response.json();
 
-
         if (!response.ok || !Array.isArray(json.actions)) {
           throw new Error(json.message || json.error?.what || `Invalid response from ${historyApi}`);
         }
@@ -1491,18 +1470,6 @@ async function fetchRecentConvoyActions() {
           if (CONVOY_ACTIONS.includes(actionName)) foundActions.push({ contract, actionName, action });
         }
 
-=======
-
-        if (!response.ok || !Array.isArray(json.actions)) {
-          throw new Error(json.message || json.error?.what || `Invalid response from ${historyApi}`);
-        }
-
-        for (const action of json.actions) {
-          const actionName = action.act?.name || action.name || action.action;
-          if (CONVOY_ACTIONS.includes(actionName)) foundActions.push({ contract, actionName, action });
-        }
-
->>>>>>> main
         contractActionsLoaded = true;
         break;
       } catch (error) {
@@ -1772,9 +1739,7 @@ async function handleRaid(interaction, raidId = null) {
     reward
   );
 
-
   const rankAward = await awardRankXp(interaction.user.id, wallet, convoy.id, convoy.legendary, success);
-
 
   convoy.attempts++;
   if (success) convoy.successes++;
@@ -1816,13 +1781,9 @@ async function handleRaid(interaction, raidId = null) {
       "",
       flavor,
       "",
-
       `💰 Loot gained: **${reward} $NKFE**`,
       `🎖️ Rank XP gained: **${rankAward.xpAwarded} XP**`,
       rankAward.promoted ? `⬆️ Promotion: **${formatRank(rankAward.rankAfter)}**` : `Rank: **${formatRank(rankAward.rankAfter)}**`
-
-      `💰 Loot gained: **${reward} $NKFE**`
-
     ].join("\n"));
   } else {
     const flavor = failMessages[Math.floor(Math.random() * failMessages.length)];
@@ -1834,14 +1795,10 @@ async function handleRaid(interaction, raidId = null) {
       `Faction: **${getFactionLabel(faction)}**`,
       `Convoy ID: **${convoy.displayId}**`,
       "",
-
       flavor,
       "",
       `🎖️ Rank XP gained: **${rankAward.xpAwarded} XP**`,
       rankAward.promoted ? `⬆️ Promotion: **${formatRank(rankAward.rankAfter)}**` : `Rank: **${formatRank(rankAward.rankAfter)}**`
-
-      flavor
-
     ].join("\n"));
   }
   const publicChannel =
@@ -1918,7 +1875,6 @@ async function buildRaidStatsMessage(discordId, displayName) {
     `Legendary Convoy Wins: **${row?.legendary_successes || 0}**`
   );
 }
-
 
 async function buildRankMessage(discordId, displayName) {
   const wallet = await getVerifiedWallet(discordId);
@@ -2013,8 +1969,6 @@ function buildRankRewardsMessage() {
   ].join("\n");
 }
 
-=======
->>>>>>> main
 async function sendRaidLeaderboard(interaction) {
   const result = await pool.query(`
     SELECT discord_id, wallet, faction, weekly_nkfe, weekly_successes, weekly_attempts, lifetime_nkfe
@@ -2075,12 +2029,10 @@ async function handleProfileAction(interaction, action) {
     return;
   }
 
-
   if (action === PROFILE_ACTIONS.RANK) {
     await interaction.editReply(await buildRankMessage(interaction.user.id, member.displayName));
     return;
   }
-
 
   if (action === PROFILE_ACTIONS.RAID_STATS) {
     await interaction.editReply(await buildRaidStatsMessage(interaction.user.id, member.displayName));
