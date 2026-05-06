@@ -56,7 +56,10 @@ const RAID_BUTTON_PREFIX = "raid_convoy:";
 const PROFILE_BUTTON_PREFIX = "profile_action:";
 const PROFILE_ACTIONS = {
   REFRESH: "refresh",
+<<<<<<< codex/review-code-e6hd5g
   RANK: "rank",
+=======
+>>>>>>> main
   RAID_STATS: "raidstats",
   RAID_LEADERBOARD: "raidleaderboard",
   RAID_FACTIONS: "raidfactions"
@@ -605,7 +608,10 @@ function buildProfileActionRows() {
   return [
     new ActionRowBuilder().addComponents(
       buildProfileActionButton(PROFILE_ACTIONS.REFRESH, "Refresh Roles", ButtonStyle.Primary),
+<<<<<<< codex/review-code-e6hd5g
       buildProfileActionButton(PROFILE_ACTIONS.RANK, "Rank"),
+=======
+>>>>>>> main
       buildProfileActionButton(PROFILE_ACTIONS.RAID_STATS, "Raid Stats"),
       buildProfileActionButton(PROFILE_ACTIONS.RAID_LEADERBOARD, "Raid Board"),
       buildProfileActionButton(PROFILE_ACTIONS.RAID_FACTIONS, "Factions")
@@ -1045,15 +1051,22 @@ function buildProfileStats(assets, counts) {
   };
 }
 
+<<<<<<< codex/review-code-e6hd5g
 function buildProfileMessage(member, wallet, assetData, finalRules, counts, raidProfile = null, rankProfile = null) {
+=======
+function buildProfileMessage(member, wallet, assetData, finalRules, counts, raidProfile = null) {
+>>>>>>> main
   const assets = assetData.combinedAssets;
   const stats = buildProfileStats(assets, counts);
   const attempts = Number(raidProfile?.total_attempts || 0);
   const successes = Number(raidProfile?.total_successes || 0);
   const failedRaids = Math.max(attempts - successes, 0);
   const successRate = attempts ? Math.round((successes / attempts) * 100) : 0;
+<<<<<<< codex/review-code-e6hd5g
   const rankProgress = calculateRankProgress(rankProfile?.xp || 0);
   const convoyPower = calculateConvoyPower(rankProfile?.xp || 0, raidProfile);
+=======
+>>>>>>> main
 
   return [
     "🏭 **NiftyKicks Factory Profile**",
@@ -1062,6 +1075,7 @@ function buildProfileMessage(member, wallet, assetData, finalRules, counts, raid
     `**Wallet:** ${wallet}`,
     `**Faction:** ${getFactionLabel(raidProfile?.faction)}`,
     "",
+<<<<<<< codex/review-code-e6hd5g
     "🎖️ **Convoy Command Rank**",
     `Rank: **${formatRank(rankProgress.currentRank)}**`,
     rankProgress.nextRank
@@ -1070,6 +1084,8 @@ function buildProfileMessage(member, wallet, assetData, finalRules, counts, raid
     rankProgress.nextRank ? `Next Rank: **${formatRank(rankProgress.nextRank)}**` : "Next Rank: **None — top of command**",
     `Convoy Power: **${convoyPower}**`,
     "",
+=======
+>>>>>>> main
     "**Convoy Raider Snapshot**",
     `Raid Attempts: **${attempts}**`,
     `Successful Raids: **${successes}**`,
@@ -1103,17 +1119,27 @@ function buildProfileMessage(member, wallet, assetData, finalRules, counts, raid
 
 async function getProfileForMember(member, wallet) {
   await ensureRaiderProfile(member.id, wallet);
+<<<<<<< codex/review-code-e6hd5g
   await ensureRankProfile(member.id, wallet);
   const [assetData, raidProfile, rankProfile] = await Promise.all([
     getAllRoleAssets(wallet),
     getRaiderProfile(member.id),
     getRankProfile(member.id)
+=======
+  const [assetData, raidProfile] = await Promise.all([
+    getAllRoleAssets(wallet),
+    getRaiderProfile(member.id)
+>>>>>>> main
   ]);
   const assets = assetData.combinedAssets;
   const counts = countTemplates(assets);
   const qualified = ROLE_RULES.filter(rule => qualifiesForRule(rule, assets, counts));
   const finalRules = selectHighestGroupedRules(qualified);
+<<<<<<< codex/review-code-e6hd5g
   return buildProfileMessage(member, wallet, assetData, finalRules, counts, raidProfile, rankProfile);
+=======
+  return buildProfileMessage(member, wallet, assetData, finalRules, counts, raidProfile);
+>>>>>>> main
 }
 
 async function buildProfileReplyOptions(member, wallet) {
@@ -1459,6 +1485,7 @@ async function fetchRecentConvoyActions() {
       try {
         const response = await fetch(url);
         const json = await response.json();
+<<<<<<< codex/review-code-e6hd5g
 
         if (!response.ok || !Array.isArray(json.actions)) {
           throw new Error(json.message || json.error?.what || `Invalid response from ${historyApi}`);
@@ -1469,6 +1496,18 @@ async function fetchRecentConvoyActions() {
           if (CONVOY_ACTIONS.includes(actionName)) foundActions.push({ contract, actionName, action });
         }
 
+=======
+
+        if (!response.ok || !Array.isArray(json.actions)) {
+          throw new Error(json.message || json.error?.what || `Invalid response from ${historyApi}`);
+        }
+
+        for (const action of json.actions) {
+          const actionName = action.act?.name || action.name || action.action;
+          if (CONVOY_ACTIONS.includes(actionName)) foundActions.push({ contract, actionName, action });
+        }
+
+>>>>>>> main
         contractActionsLoaded = true;
         break;
       } catch (error) {
@@ -1738,8 +1777,11 @@ async function handleRaid(interaction, raidId = null) {
     reward
   );
 
+<<<<<<< codex/review-code-e6hd5g
   const rankAward = await awardRankXp(interaction.user.id, wallet, convoy.id, convoy.legendary, success);
 
+=======
+>>>>>>> main
   convoy.attempts++;
   if (success) convoy.successes++;
   convoy.totalReward += reward;
@@ -1780,9 +1822,13 @@ async function handleRaid(interaction, raidId = null) {
       "",
       flavor,
       "",
+<<<<<<< codex/review-code-e6hd5g
       `💰 Loot gained: **${reward} $NKFE**`,
       `🎖️ Rank XP gained: **${rankAward.xpAwarded} XP**`,
       rankAward.promoted ? `⬆️ Promotion: **${formatRank(rankAward.rankAfter)}**` : `Rank: **${formatRank(rankAward.rankAfter)}**`
+=======
+      `💰 Loot gained: **${reward} $NKFE**`
+>>>>>>> main
     ].join("\n"));
   } else {
     const flavor = failMessages[Math.floor(Math.random() * failMessages.length)];
@@ -1794,10 +1840,14 @@ async function handleRaid(interaction, raidId = null) {
       `Faction: **${getFactionLabel(faction)}**`,
       `Convoy ID: **${convoy.displayId}**`,
       "",
+<<<<<<< codex/review-code-e6hd5g
       flavor,
       "",
       `🎖️ Rank XP gained: **${rankAward.xpAwarded} XP**`,
       rankAward.promoted ? `⬆️ Promotion: **${formatRank(rankAward.rankAfter)}**` : `Rank: **${formatRank(rankAward.rankAfter)}**`
+=======
+      flavor
+>>>>>>> main
     ].join("\n"));
   }
   const publicChannel =
@@ -1875,6 +1925,7 @@ async function buildRaidStatsMessage(discordId, displayName) {
   );
 }
 
+<<<<<<< codex/review-code-e6hd5g
 async function buildRankMessage(discordId, displayName) {
   const wallet = await getVerifiedWallet(discordId);
   if (!wallet) return "No verified wallet found. Run `/verify wallet.wam` first.";
@@ -1968,6 +2019,8 @@ function buildRankRewardsMessage() {
   ].join("\n");
 }
 
+=======
+>>>>>>> main
 async function sendRaidLeaderboard(interaction) {
   const result = await pool.query(`
     SELECT discord_id, wallet, faction, weekly_nkfe, weekly_successes, weekly_attempts, lifetime_nkfe
@@ -2028,11 +2081,14 @@ async function handleProfileAction(interaction, action) {
     return;
   }
 
+<<<<<<< codex/review-code-e6hd5g
   if (action === PROFILE_ACTIONS.RANK) {
     await interaction.editReply(await buildRankMessage(interaction.user.id, member.displayName));
     return;
   }
 
+=======
+>>>>>>> main
   if (action === PROFILE_ACTIONS.RAID_STATS) {
     await interaction.editReply(await buildRaidStatsMessage(interaction.user.id, member.displayName));
     return;
