@@ -4,7 +4,10 @@ const {
   REST,
   Routes,
   SlashCommandBuilder,
-  PermissionFlagsBits
+  PermissionFlagsBits,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle
 } = require("discord.js");
 
 // Node 18+ includes global fetch. Do not require node-fetch v3 from CommonJS.
@@ -28,7 +31,7 @@ const {
   LEADERBOARD_CHANNEL_ID,
   GENERAL_CHAT_CHANNEL_ID,
   WAX_CHAIN_API,
-  WAX_HISTORY_API,
+  WAX_HISTORY_APIS,
   CONTRACT_ACCOUNTS,
   CONVOY_CONTRACTS,
   CONVOY_ACTIONS,
@@ -47,7 +50,16 @@ let verifiedWallets = {};
 let scheduledRefreshRunning = false;
 let seenConvoyActionIds = new Set();
 let convoyTrackerInitialized = false;
-let activeConvoy = null;
+let activeConvoys = new Map();
+
+const RAID_BUTTON_PREFIX = "raid_convoy:";
+const PROFILE_BUTTON_PREFIX = "profile_action:";
+const PROFILE_ACTIONS = {
+  REFRESH: "refresh",
+  RAID_STATS: "raidstats",
+  RAID_LEADERBOARD: "raidleaderboard",
+  RAID_FACTIONS: "raidfactions"
+};
 
 const pool = new Pool({
   connectionString: DATABASE_URL,
@@ -322,6 +334,24 @@ function getFactionLabel(factionKey) {
   return `${faction.emoji} ${faction.name}`;
 }
 
+function buildProfileActionButton(action, label, style = ButtonStyle.Secondary) {
+  return new ButtonBuilder()
+    .setCustomId(`${PROFILE_BUTTON_PREFIX}${action}`)
+    .setLabel(label)
+    .setStyle(style);
+}
+
+function buildProfileActionRows() {
+  return [
+    new ActionRowBuilder().addComponents(
+      buildProfileActionButton(PROFILE_ACTIONS.REFRESH, "Refresh Roles", ButtonStyle.Primary),
+      buildProfileActionButton(PROFILE_ACTIONS.RAID_STATS, "Raid Stats"),
+      buildProfileActionButton(PROFILE_ACTIONS.RAID_LEADERBOARD, "Raid Board"),
+      buildProfileActionButton(PROFILE_ACTIONS.RAID_FACTIONS, "Factions")
+    )
+  ];
+}
+
 async function registerCommands() {
   const commands = [
     new SlashCommandBuilder()
@@ -352,12 +382,13 @@ async function registerCommands() {
 
     new SlashCommandBuilder()
       .setName("testconvoy")
-      .setDescription("Test posting a convoy activity message to general chat.")
+      .setDescription("Admin: test posting a convoy activity message to general chat.")
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
       .toJSON(),
 
     new SlashCommandBuilder()
       .setName("raid")
-      .setDescription("Attempt to raid the active NiftyKicks convoy.")
+      .setDescription("Attempt to raid the newest active convoy. Use alert buttons to raid specific convoys.")
       .toJSON(),
 
     new SlashCommandBuilder()
@@ -738,58 +769,70 @@ function buildProfileStats(assets, counts) {
   };
 }
 
-function buildProfileMessage(member, wallet, assetData, finalRules, counts) {
+function buildProfileMessage(member, wallet, assetData, finalRules, counts, raidProfile = null) {
   const assets = assetData.combinedAssets;
   const stats = buildProfileStats(assets, counts);
+  const attempts = Number(raidProfile?.total_attempts || 0);
+  const successes = Number(raidProfile?.total_successes || 0);
+  const failedRaids = Math.max(attempts - successes, 0);
+  const successRate = attempts ? Math.round((successes / attempts) * 100) : 0;
 
-  return (
-    `🏭 **NiftyKicks Factory Profile**
-
-` +
-    `**Player:** ${member.displayName}
-` +
-    `**Wallet:** ${wallet}
-
-` +
-    `**Assets Evaluated**
-` +
-    `Wallet NFTs: **${assetData.walletAssets.length}**
-` +
-    `Staked NFTs: **${assetData.stakedAssets.length}**
-` +
-    `Total Evaluated: **${assetData.combinedAssets.length}**
-
-` +
-    `**Progression Snapshot**
-` +
-    `🏭 Factories Tier 9: **${stats.factoryTier9}**
-` +
-    `⚙️ Machine Set Tier 9 Complete: **${stats.machinesTier9Complete ? "Yes" : "No"}**
-` +
-    `👷 Skill Laborers Tier 9: **${stats.skillLaborerTier9}**
-` +
-    `🧠 Tech Centers Tier 3: **${stats.techCenterTier3}**
-` +
-    `🔥 Military Facilities Tier 4: **${stats.militaryTier4}**
-` +
-    `📖 Chronicle Books: **${stats.chronicleBooks}**
-` +
-    `🌟 Neon Genesis Set Complete: **${stats.neonGenesisComplete ? "Yes" : "No"}**
-
-` +
-    `**Current NFT Roles**
-` +
-    `${finalRules.length ? finalRules.map(r => r.name).join("\n") : "None"}`
-  );
+  return [
+    "🏭 **NiftyKicks Factory Profile**",
+    "",
+    `**Player:** ${member.displayName}`,
+    `**Wallet:** ${wallet}`,
+    `**Faction:** ${getFactionLabel(raidProfile?.faction)}`,
+    "",
+    "**Convoy Raider Snapshot**",
+    `Raid Attempts: **${attempts}**`,
+    `Successful Raids: **${successes}**`,
+    `Failed Raids: **${failedRaids}**`,
+    `Success Rate: **${successRate}%**`,
+    `This Week's Raid Earnings: **${raidProfile?.weekly_nkfe || 0} $NKFE**`,
+    `Lifetime NKFE Earned: **${raidProfile?.lifetime_nkfe || 0} $NKFE**`,
+    `Current Payout Balance: **${raidProfile?.payout_nkfe || 0} $NKFE**`,
+    `Legendary Convoy Wins: **${raidProfile?.legendary_successes || 0}**`,
+    "",
+    "**Assets Evaluated**",
+    `Wallet NFTs: **${assetData.walletAssets.length}**`,
+    `Staked NFTs: **${assetData.stakedAssets.length}**`,
+    `Total Evaluated: **${assetData.combinedAssets.length}**`,
+    "",
+    "**Progression Snapshot**",
+    `🏭 Factories Tier 9: **${stats.factoryTier9}**`,
+    `⚙️ Machine Set Tier 9 Complete: **${stats.machinesTier9Complete ? "Yes" : "No"}**`,
+    `👷 Skill Laborers Tier 9: **${stats.skillLaborerTier9}**`,
+    `🧠 Tech Centers Tier 3: **${stats.techCenterTier3}**`,
+    `🔥 Military Facilities Tier 4: **${stats.militaryTier4}**`,
+    `📖 Chronicle Books: **${stats.chronicleBooks}**`,
+    `🌟 Neon Genesis Set Complete: **${stats.neonGenesisComplete ? "Yes" : "No"}**`,
+    "",
+    "**Current NFT Roles**",
+    finalRules.length ? finalRules.map(r => r.name).join("\n") : "None",
+    "",
+    "Use the buttons below to refresh roles or jump into raid/faction views."
+  ].join("\n");
 }
 
 async function getProfileForMember(member, wallet) {
-  const assetData = await getAllRoleAssets(wallet);
+  await ensureRaiderProfile(member.id, wallet);
+  const [assetData, raidProfile] = await Promise.all([
+    getAllRoleAssets(wallet),
+    getRaiderProfile(member.id)
+  ]);
   const assets = assetData.combinedAssets;
   const counts = countTemplates(assets);
   const qualified = ROLE_RULES.filter(rule => qualifiesForRule(rule, assets, counts));
   const finalRules = selectHighestGroupedRules(qualified);
-  return buildProfileMessage(member, wallet, assetData, finalRules, counts);
+  return buildProfileMessage(member, wallet, assetData, finalRules, counts, raidProfile);
+}
+
+async function buildProfileReplyOptions(member, wallet) {
+  return {
+    content: await getProfileForMember(member, wallet),
+    components: buildProfileActionRows()
+  };
 }
 
 async function announceMilestones(guild, member, addedRoleIds) {
@@ -867,35 +910,41 @@ async function refreshAllVerifiedWallets() {
   }
 
   scheduledRefreshRunning = true;
-  console.log("Starting scheduled wallet refresh...");
-
-  const guild = await client.guilds.fetch(GUILD_ID);
   let checked = 0;
   let failed = 0;
 
-  for (const discordId of Object.keys(verifiedWallets)) {
-    const wallet = verifiedWallets[discordId];
+  try {
+    console.log("Starting scheduled wallet refresh...");
 
-    try {
-      const member = await guild.members.fetch(discordId);
-      await processWalletByMember(guild, member, wallet, false, true);
-      checked++;
-      console.log(`Refreshed ${wallet} for Discord user ${discordId}`);
-      await sleep(1500);
-    } catch (error) {
-      if (error?.code === 10007 || error?.status === 404) {
-        await removeWalletFromDatabase(discordId);
-        console.log(`Removed stale wallet ${wallet} for Discord user ${discordId}: member no longer in guild.`);
-        continue;
+    const guild = await client.guilds.fetch(GUILD_ID);
+
+    for (const discordId of Object.keys(verifiedWallets)) {
+      const wallet = verifiedWallets[discordId];
+
+      try {
+        const member = await guild.members.fetch(discordId);
+        await processWalletByMember(guild, member, wallet, false, true);
+        checked++;
+        console.log(`Refreshed ${wallet} for Discord user ${discordId}`);
+        await sleep(1500);
+      } catch (error) {
+        if (error?.code === 10007 || error?.status === 404) {
+          await removeWalletFromDatabase(discordId);
+          console.log(`Removed stale wallet ${wallet} for Discord user ${discordId}: member no longer in guild.`);
+          continue;
+        }
+
+        failed++;
+        console.error(`Failed to refresh ${wallet} for Discord user ${discordId}:`, error);
       }
-
-      failed++;
-      console.error(`Failed to refresh ${wallet} for Discord user ${discordId}:`, error);
     }
-  }
 
-  scheduledRefreshRunning = false;
-  console.log(`Scheduled refresh complete. Checked: ${checked}. Failed: ${failed}.`);
+    console.log(`Scheduled refresh complete. Checked: ${checked}. Failed: ${failed}.`);
+  } catch (error) {
+    console.error("Scheduled wallet refresh failed:", error);
+  } finally {
+    scheduledRefreshRunning = false;
+  }
 }
 
 async function buildStatsMessage(guild) {
@@ -1114,70 +1163,151 @@ async function fetchRecentConvoyActions() {
   const foundActions = [];
 
   for (const contract of CONVOY_CONTRACTS) {
-    const url = `${WAX_HISTORY_API}/v2/history/get_actions?account=${contract}&sort=desc&limit=25`;
+    let contractActionsLoaded = false;
 
-    try {
-      const response = await fetch(url);
-      const json = await response.json();
-      const actions = json.actions || [];
+    for (const historyApi of WAX_HISTORY_APIS) {
+      const url = `${historyApi}/v2/history/get_actions?account=${contract}&sort=desc&limit=25`;
 
-      for (const action of actions) {
-        const actionName = action.act?.name || action.name || action.action;
-        if (CONVOY_ACTIONS.includes(actionName)) foundActions.push({ contract, actionName, action });
+      try {
+        const response = await fetch(url);
+        const json = await response.json();
+
+        if (!response.ok || !Array.isArray(json.actions)) {
+          throw new Error(json.message || json.error?.what || `Invalid response from ${historyApi}`);
+        }
+
+        for (const action of json.actions) {
+          const actionName = action.act?.name || action.name || action.action;
+          if (CONVOY_ACTIONS.includes(actionName)) foundActions.push({ contract, actionName, action });
+        }
+
+        contractActionsLoaded = true;
+        break;
+      } catch (error) {
+        console.log(`Failed to fetch recent actions for ${contract} from ${historyApi}:`, error.message);
       }
-    } catch (error) {
-      console.log(`Failed to fetch recent actions for ${contract}:`, error.message);
+    }
+
+    if (!contractActionsLoaded) {
+      console.log(`Failed to fetch recent actions for ${contract} from all configured WAX history APIs.`);
     }
   }
 
   return foundActions;
 }
 
-async function openRaidWindow({ route, convoyId, wallet, legendary }) {
+function buildRaidButtonRow(raidId, disabled = false) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`${RAID_BUTTON_PREFIX}${raidId}`)
+      .setLabel(disabled ? "Raid Window Closed" : "Raid This Convoy")
+      .setStyle(ButtonStyle.Danger)
+      .setDisabled(disabled)
+  );
+}
+
+function buildRaidClosedContent(content, convoy) {
+  return [
+    content,
+    "",
+    "📊 **Convoy Raid Closed**",
+    `Attempts: **${convoy.attempts}**`,
+    `Successful raids: **${convoy.successes}**`,
+    `Total NKFE looted: **${convoy.totalReward} $NKFE**`
+  ].join("\n");
+}
+
+async function closeRaidWindow(convoy, raidMessage, content) {
+  activeConvoys.delete(convoy.id);
+
+  try {
+    await raidMessage.edit({
+      content: buildRaidClosedContent(content, convoy),
+      components: [buildRaidButtonRow(convoy.id, true)]
+    });
+  } catch (error) {
+    console.log(`Could not close raid window for convoy ${convoy.id}:`, error.message);
+  }
+}
+
+function getActiveConvoy(raidId) {
+  const convoy = activeConvoys.get(String(raidId));
+  if (!convoy) return null;
+
+  if (Date.now() > convoy.expiresAt) {
+    activeConvoys.delete(String(raidId));
+    return null;
+  }
+
+  return convoy;
+}
+
+function getLatestActiveConvoy() {
+  let latestConvoy = null;
+
+  for (const convoy of activeConvoys.values()) {
+    if (Date.now() > convoy.expiresAt) {
+      activeConvoys.delete(convoy.id);
+      continue;
+    }
+
+    if (!latestConvoy || convoy.startedAt > latestConvoy.startedAt) latestConvoy = convoy;
+  }
+
+  return latestConvoy;
+}
+
+async function openRaidWindow({ route, convoyId, raidId, wallet, legendary }) {
   const guild = await client.guilds.fetch(GUILD_ID);
   const channel = guild.channels.cache.get(GENERAL_CHAT_CHANNEL_ID);
   if (!channel) return;
 
-  activeConvoy = {
-    id: String(convoyId),
+  const convoy = {
+    id: String(raidId),
+    displayId: String(convoyId),
     route: String(route),
     wallet: String(wallet),
     legendary: Boolean(legendary),
     startedAt: Date.now(),
     expiresAt: Date.now() + RAID_WINDOW_SECONDS * 1000,
-    attemptedDiscordIds: new Set()
+    attemptedDiscordIds: new Set(),
+    attempts: 0,
+    successes: 0,
+    totalReward: 0
   };
+  activeConvoys.set(convoy.id, convoy);
 
-  if (legendary) {
-    await channel.send(
-      "🚨 **LEGENDARY CONVOY DETECTED!** 🚨\n\n" +
-      `Route / Mission: **${route}**
-` +
-      `Convoy ID: **${convoyId}**
+  const content = convoy.legendary
+    ? [
+        "🚨 **LEGENDARY CONVOY DETECTED!** 🚨",
+        "",
+        `Route / Mission: **${route}**`,
+        `Convoy ID: **${convoyId}**`,
+        "",
+        `Raid window: **${RAID_WINDOW_SECONDS} seconds**`,
+        "Potential loot: **25–75 $NKFE**",
+        "",
+        "Click the red button below to raid **this specific convoy**."
+      ].join("\n")
+    : [
+        "⚠️ **Convoy Raiders Alert!** ⚠️",
+        "",
+        `Route / Mission: **${route}**`,
+        `Convoy ID: **${convoyId}**`,
+        "",
+        `Raid window: **${RAID_WINDOW_SECONDS} seconds**`,
+        "Reward: **1–5 $NKFE**",
+        "",
+        "Click the red button below to raid **this specific convoy**."
+      ].join("\n");
 
-` +
-      `Raid window: **${RAID_WINDOW_SECONDS} seconds**
-` +
-      "Potential loot: **25–75 $NKFE**\n\n" +
-      "Verified wallets can run `/raid` now."
-    );
-  } else {
-    await channel.send(
-      "⚠️ **Convoy Raiders Alert!** ⚠️\n\n" +
-      `Route / Mission: **${route}**
-` +
-      `Convoy ID: **${convoyId}**
-
-` +
-      `Raid window: **${RAID_WINDOW_SECONDS} seconds**
-` +
-      "Reward: **1–5 $NKFE**\n\n" +
-      "Verified wallets can run `/raid` now."
-    );
-  }
+  const raidMessage = await channel.send({
+    content,
+    components: [buildRaidButtonRow(convoy.id)]
+  });
 
   setTimeout(() => {
-    if (activeConvoy && activeConvoy.id === String(convoyId)) activeConvoy = null;
+    closeRaidWindow(convoy, raidMessage, content);
   }, RAID_WINDOW_SECONDS * 1000);
 }
 
@@ -1235,7 +1365,8 @@ async function postConvoyActivity(contract, actionName, action) {
   );
 
   const legendary = Math.random() < LEGENDARY_CONVOY_CHANCE;
-  await openRaidWindow({ route, convoyId: convoy, wallet, legendary });
+  const raidId = String(getActionId(action) || `${convoy}-${Date.now()}`);
+  await openRaidWindow({ route, convoyId: convoy, raidId, wallet, legendary });
 }
 
 async function checkConvoyActivity() {
@@ -1269,7 +1400,7 @@ async function checkConvoyActivity() {
   }
 }
 
-async function handleRaid(interaction) {
+async function handleRaid(interaction, raidId = null) {
   const member = await interaction.guild.members.fetch(interaction.user.id);
 
   if (!member.roles.cache.has(VERIFIED_WALLET_ROLE_ID)) {
@@ -1283,13 +1414,18 @@ async function handleRaid(interaction) {
     return;
   }
 
-  if (!activeConvoy || Date.now() > activeConvoy.expiresAt) {
-    await interaction.editReply("No active convoy raid window right now. Watch for the next convoy dispatch.");
+  const convoy = raidId ? getActiveConvoy(raidId) : getLatestActiveConvoy();
+  if (!convoy) {
+    await interaction.editReply(
+      raidId
+        ? "This convoy raid window has closed or is no longer available. Watch for the next convoy alert."
+        : "No active convoy raid window right now. Watch for the next convoy dispatch and click its red raid button."
+    );
     return;
   }
 
-  if (activeConvoy.attemptedDiscordIds.has(interaction.user.id)) {
-    await interaction.editReply("You already attempted to raid this convoy. Wait for the next one.");
+  if (convoy.attemptedDiscordIds.has(interaction.user.id)) {
+    await interaction.editReply("You already attempted to raid this convoy. Pick another active convoy alert or wait for the next one.");
     return;
   }
 
@@ -1297,24 +1433,28 @@ async function handleRaid(interaction) {
   const raiderProfile = await getRaiderProfile(interaction.user.id);
   const faction = raiderProfile?.faction || null;
 
-  activeConvoy.attemptedDiscordIds.add(interaction.user.id);
+  convoy.attemptedDiscordIds.add(interaction.user.id);
 
-  const successChance = activeConvoy.legendary ? LEGENDARY_RAID_SUCCESS_CHANCE : RAID_SUCCESS_CHANCE;
+  const successChance = convoy.legendary ? LEGENDARY_RAID_SUCCESS_CHANCE : RAID_SUCCESS_CHANCE;
   const success = Math.random() < successChance;
-  const reward = success ? rollNkfeReward(activeConvoy.legendary) : 0;
+  const reward = success ? rollNkfeReward(convoy.legendary) : 0;
 
   await recordRaid(
     interaction.user.id,
     wallet,
     faction,
-    activeConvoy.id,
-    activeConvoy.route,
-    activeConvoy.legendary,
+    convoy.id,
+    convoy.route,
+    convoy.legendary,
     success,
     reward
   );
 
-  const successMessages = activeConvoy.legendary
+  convoy.attempts++;
+  if (success) convoy.successes++;
+  convoy.totalReward += reward;
+
+  const successMessages = convoy.legendary
     ? [
         "You breached the legendary convoy and escaped with premium cargo.",
         "The legendary convoy took heavy damage. You got out with rare loot.",
@@ -1326,7 +1466,7 @@ async function handleRaid(interaction) {
         "Your raid crew moved fast and disappeared with the cargo."
       ];
 
-  const failMessages = activeConvoy.legendary
+  const failMessages = convoy.legendary
     ? [
         "The legendary convoy escort was too strong. Your crew was forced to retreat.",
         "Defense drones locked the route down. Raid failed.",
@@ -1340,37 +1480,30 @@ async function handleRaid(interaction) {
 
   if (success) {
     const flavor = successMessages[Math.floor(Math.random() * successMessages.length)];
-    await interaction.editReply(
-      "⚔️ **Raid Successful!**\n\n" +
-      `Raider: **${member.displayName}**
-` +
-      `Wallet: **${wallet}**
-` +
-      `Faction: **${getFactionLabel(faction)}**
-` +
-      `Convoy ID: **${activeConvoy.id}**
-
-` +
-      `${flavor}
-
-` +
+    await interaction.editReply([
+      "⚔️ **Raid Successful!**",
+      "",
+      `Raider: **${member.displayName}**`,
+      `Wallet: **${wallet}**`,
+      `Faction: **${getFactionLabel(faction)}**`,
+      `Convoy ID: **${convoy.displayId}**`,
+      "",
+      flavor,
+      "",
       `💰 Loot gained: **${reward} $NKFE**`
-    );
+    ].join("\n"));
   } else {
     const flavor = failMessages[Math.floor(Math.random() * failMessages.length)];
-    await interaction.editReply(
-      "🛡️ **Raid Failed!**\n\n" +
-      `Raider: **${member.displayName}**
-` +
-      `Wallet: **${wallet}**
-` +
-      `Faction: **${getFactionLabel(faction)}**
-` +
-      `Convoy ID: **${activeConvoy.id}**
-
-` +
+    await interaction.editReply([
+      "🛡️ **Raid Failed!**",
+      "",
+      `Raider: **${member.displayName}**`,
+      `Wallet: **${wallet}**`,
+      `Faction: **${getFactionLabel(faction)}**`,
+      `Convoy ID: **${convoy.displayId}**`,
+      "",
       flavor
-    );
+    ].join("\n"));
   }
   const publicChannel =
     interaction.guild.channels.cache.get(GENERAL_CHAT_CHANNEL_ID) ||
@@ -1382,8 +1515,22 @@ async function handleRaid(interaction) {
       : failMessages[Math.floor(Math.random() * failMessages.length)];
 
     const publicMessage = success
-      ? `💥 **CONVOY RAID SUCCESS!**\n\nRaider: **${member.displayName}**\nFaction: **${getFactionLabel(faction)}**\nConvoy ID: **${activeConvoy.id}**\n\n${publicFlavor}\n\n💰 Loot: **${reward} $NKFE**`
-      : `🛡️ **RAID FAILED!**\n\nRaider: **${member.displayName}**\nFaction: **${getFactionLabel(faction)}**\nConvoy ID: **${activeConvoy.id}**\n\n${publicFlavor}`;
+      ? `💥 **CONVOY RAID SUCCESS!**
+
+Raider: **${member.displayName}**
+Faction: **${getFactionLabel(faction)}**
+Convoy ID: **${convoy.displayId}**
+
+${publicFlavor}
+
+💰 Loot: **${reward} $NKFE**`
+      : `🛡️ **RAID FAILED!**
+
+Raider: **${member.displayName}**
+Faction: **${getFactionLabel(faction)}**
+Convoy ID: **${convoy.displayId}**
+
+${publicFlavor}`;
 
     try {
       await publicChannel.send(publicMessage);
@@ -1403,6 +1550,7 @@ async function buildRaidStatsMessage(discordId, displayName) {
   const row = await getRaiderProfile(discordId);
   const attempts = Number(row?.total_attempts || 0);
   const successes = Number(row?.total_successes || 0);
+  const failedRaids = Math.max(attempts - successes, 0);
   const successRate = attempts ? Math.round((successes / attempts) * 100) : 0;
 
   return (
@@ -1424,10 +1572,90 @@ async function buildRaidStatsMessage(discordId, displayName) {
 ` +
     `Successful Raids: **${successes}**
 ` +
+    `Failed Raids: **${failedRaids}**
+` +
     `Success Rate: **${successRate}%**
 ` +
     `Legendary Convoy Wins: **${row?.legendary_successes || 0}**`
   );
+}
+
+async function sendRaidLeaderboard(interaction) {
+  const result = await pool.query(`
+    SELECT discord_id, wallet, faction, weekly_nkfe, weekly_successes, weekly_attempts, lifetime_nkfe
+    FROM raid_balances
+    ORDER BY weekly_nkfe DESC, weekly_successes DESC, weekly_attempts DESC
+    LIMIT 10
+  `);
+
+  if (!result.rows.length) {
+    await interaction.editReply("No Convoy Raiders leaderboard data yet.");
+    return;
+  }
+
+  const lines = result.rows.map((row, index) =>
+    `${index + 1}. <@${row.discord_id}> — **${row.weekly_nkfe} NKFE this week** | ${row.weekly_successes}/${row.weekly_attempts} successful | Lifetime: ${row.lifetime_nkfe} NKFE | ${getFactionLabel(row.faction)}`
+  );
+
+  await interaction.editReply("🏆 **Weekly Convoy Raiders Leaderboard**\n\n" + lines.join("\n"));
+}
+
+async function sendRaidFactions(interaction) {
+  const result = await pool.query(`
+    SELECT faction,
+           COUNT(DISTINCT discord_id) AS active_members,
+           SUM(weekly_nkfe) AS total_nkfe,
+           SUM(weekly_successes) AS successes,
+           SUM(weekly_attempts) AS attempts
+    FROM raid_balances
+    WHERE faction IS NOT NULL AND weekly_attempts > 0
+    GROUP BY faction
+    ORDER BY total_nkfe DESC, successes DESC
+  `);
+
+  if (!result.rows.length) {
+    await interaction.editReply("No faction raid data yet. Use `/joinfaction` to join a faction.");
+    return;
+  }
+
+  const lines = result.rows.map((row, index) =>
+    `${index + 1}. **${getFactionLabel(row.faction)}** — **${row.total_nkfe || 0} NKFE this week** | ${row.successes || 0}/${row.attempts || 0} successful | Active raiders: ${row.active_members}`
+  );
+
+  await interaction.editReply("🏴 **Convoy Raiders Faction Standings**\n\n" + lines.join("\n"));
+}
+
+async function handleProfileAction(interaction, action) {
+  const wallet = await getVerifiedWallet(interaction.user.id);
+  if (!wallet) {
+    await interaction.editReply("No wallet found for you yet. Please run `/verify yourwallet.wam` first.");
+    return;
+  }
+
+  const member = await interaction.guild.members.fetch(interaction.user.id);
+
+  if (action === PROFILE_ACTIONS.REFRESH) {
+    await processWalletByMember(interaction.guild, member, wallet, false, true);
+    await interaction.editReply(await buildProfileReplyOptions(member, wallet));
+    return;
+  }
+
+  if (action === PROFILE_ACTIONS.RAID_STATS) {
+    await interaction.editReply(await buildRaidStatsMessage(interaction.user.id, member.displayName));
+    return;
+  }
+
+  if (action === PROFILE_ACTIONS.RAID_LEADERBOARD) {
+    await sendRaidLeaderboard(interaction);
+    return;
+  }
+
+  if (action === PROFILE_ACTIONS.RAID_FACTIONS) {
+    await sendRaidFactions(interaction);
+    return;
+  }
+
+  await interaction.editReply("Unknown profile action.");
 }
 
 client.once("clientReady", async () => {
@@ -1487,7 +1715,7 @@ client.on("guildMemberAdd", async member => {
 });
 
 client.on("interactionCreate", async interaction => {
-  if (!interaction.isChatInputCommand()) return;
+  if (!interaction.isChatInputCommand() && !interaction.isButton()) return;
 
   try {
     await interaction.deferReply({ flags: 64 });
@@ -1497,6 +1725,23 @@ client.on("interactionCreate", async interaction => {
   }
 
   try {
+    if (interaction.isButton()) {
+      if (interaction.customId.startsWith(RAID_BUTTON_PREFIX)) {
+        const raidId = interaction.customId.slice(RAID_BUTTON_PREFIX.length);
+        await handleRaid(interaction, raidId);
+        return;
+      }
+
+      if (interaction.customId.startsWith(PROFILE_BUTTON_PREFIX)) {
+        const action = interaction.customId.slice(PROFILE_BUTTON_PREFIX.length);
+        await handleProfileAction(interaction, action);
+        return;
+      }
+
+      await interaction.editReply("Unknown button interaction.");
+      return;
+    }
+
     if (interaction.commandName === "stats") {
       const message = await buildStatsMessage(interaction.guild);
       await interaction.editReply(message);
@@ -1527,8 +1772,7 @@ client.on("interactionCreate", async interaction => {
         return;
       }
       const member = await interaction.guild.members.fetch(interaction.user.id);
-      const profile = await getProfileForMember(member, wallet);
-      await interaction.editReply(profile);
+      await interaction.editReply(await buildProfileReplyOptions(member, wallet));
       return;
     }
 
@@ -1578,49 +1822,12 @@ client.on("interactionCreate", async interaction => {
     }
 
     if (interaction.commandName === "raidleaderboard") {
-      const result = await pool.query(`
-        SELECT discord_id, wallet, faction, weekly_nkfe, weekly_successes, weekly_attempts, lifetime_nkfe
-        FROM raid_balances
-        ORDER BY weekly_nkfe DESC, weekly_successes DESC, weekly_attempts DESC
-        LIMIT 10
-      `);
-
-      if (!result.rows.length) {
-        await interaction.editReply("No Convoy Raiders leaderboard data yet.");
-        return;
-      }
-
-      const lines = result.rows.map((row, index) =>
-        `${index + 1}. <@${row.discord_id}> — **${row.weekly_nkfe} NKFE this week** | ${row.weekly_successes}/${row.weekly_attempts} successful | Lifetime: ${row.lifetime_nkfe} NKFE | ${getFactionLabel(row.faction)}`
-      );
-
-      await interaction.editReply("🏆 **Weekly Convoy Raiders Leaderboard**\n\n" + lines.join("\n"));
+      await sendRaidLeaderboard(interaction);
       return;
     }
 
     if (interaction.commandName === "raidfactions") {
-      const result = await pool.query(`
-        SELECT faction,
-               COUNT(DISTINCT discord_id) AS active_members,
-               SUM(weekly_nkfe) AS total_nkfe,
-               SUM(weekly_successes) AS successes,
-               SUM(weekly_attempts) AS attempts
-        FROM raid_balances
-        WHERE faction IS NOT NULL AND weekly_attempts > 0
-        GROUP BY faction
-        ORDER BY total_nkfe DESC, successes DESC
-      `);
-
-      if (!result.rows.length) {
-        await interaction.editReply("No faction raid data yet. Use `/joinfaction` to join a faction.");
-        return;
-      }
-
-      const lines = result.rows.map((row, index) =>
-        `${index + 1}. **${getFactionLabel(row.faction)}** — **${row.total_nkfe || 0} NKFE this week** | ${row.successes || 0}/${row.attempts || 0} successful | Active raiders: ${row.active_members}`
-      );
-
-      await interaction.editReply("🏴 **Convoy Raiders Faction Standings**\n\n" + lines.join("\n"));
+      await sendRaidFactions(interaction);
       return;
     }
 
