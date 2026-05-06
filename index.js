@@ -31,6 +31,8 @@ const { createRankFeature } = require("./src/features/ranks");
 const { createRaidFeature } = require("./src/features/raids");
 const { createProfileFeature } = require("./src/features/profile");
 const { initDatabase } = require("./src/db/init");
+const { createWalletRepository } = require("./src/db/wallets");
+const { createRaiderRepository } = require("./src/db/raiders");
 const { registerCommands } = require("./src/bot/commands");
 const { createInteractionHandler } = require("./src/bot/interactions");
 const { startSchedules } = require("./src/bot/schedules");
@@ -44,6 +46,23 @@ const pool = new Pool({
   connectionString: DATABASE_URL,
   ssl: DATABASE_URL ? { rejectUnauthorized: false } : false
 });
+
+const {
+  loadWalletsFromDatabase,
+  saveWalletToDatabase,
+  removeWalletFromDatabase,
+  getVerifiedWallet
+} = createWalletRepository({
+  pool,
+  getWallets: () => verifiedWallets
+});
+
+const {
+  ensureRaiderProfile,
+  getRaiderProfile,
+  setRaiderFaction,
+  recordRaid
+} = createRaiderRepository({ pool });
 
 const ROLE_RULES = [
   { type: "simple_template", name: "📜 Archive_Keeper", roleId: "1497994063465545890", templateId: "680277", quantity: 1 },
@@ -175,277 +194,6 @@ function logTableReadWarning(code, table, reason, prefix = "Skipping table") {
 
   tableReadWarningKeys.add(warningKey);
   console.log(`${prefix} ${code}.${table}: ${reason}`);
-}
-
-async function loadWalletsFromDatabase() {
-  const result = await pool.query("SELECT discord_id, wallet FROM verified_wallets");
-  const wallets = {};
-  for (const row of result.rows) wallets[row.discord_id] = row.wallet;
-  return wallets;
-}
-
-async function saveWalletToDatabase(discordId, wallet) {
-  await pool.query(
-    `
-    INSERT INTO verified_wallets (discord_id, wallet, updated_at)
-    VALUES ($1, $2, NOW())
-    ON CONFLICT (discord_id)
-    DO UPDATE SET wallet = EXCLUDED.wallet, updated_at = NOW();
-    `,
-    [discordId, wallet]
-  );
-  verifiedWallets[discordId] = wallet;
-}
-
-async function removeWalletFromDatabase(discordId) {
-  await pool.query("DELETE FROM verified_wallets WHERE discord_id = $1", [discordId]);
-  delete verifiedWallets[discordId];
-}
-
-async function getVerifiedWallet(discordId) {
-  const result = await pool.query("SELECT wallet FROM verified_wallets WHERE discord_id = $1", [discordId]);
-  return result.rows[0]?.wallet || null;
-}
-
-async function ensureRaiderProfile(discordId, wallet) {
-  await pool.query(
-    `
-    INSERT INTO raid_balances (discord_id, wallet, updated_at)
-    VALUES ($1, $2, NOW())
-    ON CONFLICT (discord_id)
-    DO UPDATE SET wallet = EXCLUDED.wallet, updated_at = NOW();
-    `,
-    [discordId, wallet]
-  );
-}
-
-async function getRaiderProfile(discordId) {
-  const result = await pool.query("SELECT * FROM raid_balances WHERE discord_id = $1", [discordId]);
-  return result.rows[0] || null;
-}
-
-function getCurrentWeekStart() {
-  const now = new Date();
-  const day = now.getUTCDay();
-  const diff = day === 0 ? 6 : day - 1;
-  const weekStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - diff));
-  return weekStart.toISOString().slice(0, 10);
-}
-
-function getRankByXp(xp) {
-  let currentRank = RANKS[0];
-  for (const rank of RANKS) {
-    if (Number(xp || 0) >= rank.xp) currentRank = rank;
-    else break;
-  }
-  return currentRank;
-}
-
-function getRankByLevel(level) {
-  return RANKS.find(rank => rank.level === Number(level)) || RANKS[0];
-}
-
-function getNextRank(rank) {
-  return RANKS.find(item => item.level === rank.level + 1) || null;
-}
-
-function calculateRankProgress(xp) {
-  const currentRank = getRankByXp(xp);
-  const nextRank = getNextRank(currentRank);
-  if (!nextRank) return { currentRank, nextRank: null, progressPercent: 100, xpIntoRank: 0, xpNeededForNext: 0 };
-
-  const xpIntoRank = Number(xp || 0) - currentRank.xp;
-  const xpNeededForNext = nextRank.xp - currentRank.xp;
-  const progressPercent = xpNeededForNext ? Math.floor((xpIntoRank / xpNeededForNext) * 100) : 100;
-  return { currentRank, nextRank, progressPercent, xpIntoRank, xpNeededForNext };
-}
-
-function calculateConvoyPower(xp, raidProfile = null) {
-  return Number(xp || 0) +
-    Number(raidProfile?.total_successes || 0) * 10 +
-    Number(raidProfile?.legendary_successes || 0) * 100;
-}
-
-function formatRank(rank) {
-  return `${rank.name} (${rank.abbreviation})`;
-}
-
-async function ensureRankProfile(discordId, wallet) {
-  const weekStart = getCurrentWeekStart();
-  await pool.query(
-    `
-    INSERT INTO raid_ranks (discord_id, wallet, weekly_xp_week_start, updated_at)
-    VALUES ($1, $2, $3::date, NOW())
-    ON CONFLICT (discord_id)
-    DO UPDATE SET wallet = EXCLUDED.wallet, updated_at = NOW();
-    `,
-    [discordId, wallet, weekStart]
-  );
-
-  await pool.query(
-    `
-    UPDATE raid_ranks
-    SET weekly_xp = 0,
-        weekly_attempt_xp = 0,
-        weekly_success_xp = 0,
-        weekly_legendary_xp = 0,
-        weekly_bonus_xp = 0,
-        weekly_xp_week_start = $2::date,
-        updated_at = NOW()
-    WHERE discord_id = $1 AND weekly_xp_week_start <> $2::date;
-    `,
-    [discordId, weekStart]
-  );
-}
-
-async function getRankProfile(discordId) {
-  const result = await pool.query("SELECT * FROM raid_ranks WHERE discord_id = $1", [discordId]);
-  return result.rows[0] || null;
-}
-
-function capRankXp(amount, currentWeeklyAmount, cap) {
-  return Math.max(Math.min(Number(amount || 0), Number(cap || 0) - Number(currentWeeklyAmount || 0)), 0);
-}
-
-async function awardRankXp(discordId, wallet, convoyId, legendary, success) {
-  await ensureRankProfile(discordId, wallet);
-
-  const rankProfile = await getRankProfile(discordId);
-  const raidProfile = await getRaiderProfile(discordId);
-  const rankBefore = getRankByXp(rankProfile?.xp || 0);
-
-  const attemptXp = capRankXp(RANK_XP_REWARDS.ATTEMPT, rankProfile?.weekly_attempt_xp, RANK_WEEKLY_XP_CAPS.ATTEMPT);
-  const successXp = success && !legendary
-    ? capRankXp(RANK_XP_REWARDS.SUCCESS, rankProfile?.weekly_success_xp, RANK_WEEKLY_XP_CAPS.SUCCESS)
-    : 0;
-  const legendaryXp = success && legendary
-    ? capRankXp(RANK_XP_REWARDS.LEGENDARY_SUCCESS, rankProfile?.weekly_legendary_xp, RANK_WEEKLY_XP_CAPS.LEGENDARY)
-    : 0;
-  const totalXp = attemptXp + successXp + legendaryXp;
-
-  if (!totalXp) {
-    return {
-      xpAwarded: 0,
-      attemptXp,
-      successXp,
-      legendaryXp,
-      rankBefore,
-      rankAfter: rankBefore,
-      promoted: false,
-      currentRank: rankBefore
-    };
-  }
-
-  const newXp = Number(rankProfile?.xp || 0) + totalXp;
-  const rankAfter = getRankByXp(newXp);
-  const convoyPower = calculateConvoyPower(newXp, raidProfile);
-
-  await pool.query(
-    `
-    UPDATE raid_ranks
-    SET xp = $2,
-        weekly_xp = weekly_xp + $3,
-        weekly_attempt_xp = weekly_attempt_xp + $4,
-        weekly_success_xp = weekly_success_xp + $5,
-        weekly_legendary_xp = weekly_legendary_xp + $6,
-        current_rank_level = $7,
-        best_rank_level = GREATEST(best_rank_level, $7),
-        convoy_power = $8,
-        wallet = $9,
-        updated_at = NOW()
-    WHERE discord_id = $1;
-    `,
-    [discordId, newXp, totalXp, attemptXp, successXp, legendaryXp, rankAfter.level, convoyPower, wallet]
-  );
-
-  await pool.query(
-    `
-    INSERT INTO raid_xp_logs (discord_id, wallet, convoy_id, xp_source, xp_amount, rank_before, rank_after)
-    VALUES ($1, $2, $3, $4, $5, $6, $7);
-    `,
-    [discordId, wallet, convoyId, legendary ? "legendary_convoy_raid" : "convoy_raid", totalXp, rankBefore.level, rankAfter.level]
-  );
-
-  if (rankAfter.level > rankBefore.level) {
-    await pool.query(
-      `
-      INSERT INTO rank_promotion_logs (discord_id, wallet, old_rank_level, new_rank_level, old_rank_name, new_rank_name)
-      VALUES ($1, $2, $3, $4, $5, $6);
-      `,
-      [discordId, wallet, rankBefore.level, rankAfter.level, rankBefore.name, rankAfter.name]
-    );
-  }
-
-  return {
-    xpAwarded: totalXp,
-    attemptXp,
-    successXp,
-    legendaryXp,
-    rankBefore,
-    rankAfter,
-    promoted: rankAfter.level > rankBefore.level,
-    currentRank: rankAfter,
-    convoyPower
-  };
-}
-
-
-async function setRaiderFaction(discordId, wallet, faction) {
-  await pool.query(
-    `
-    INSERT INTO raid_balances (discord_id, wallet, faction, updated_at)
-    VALUES ($1, $2, $3::date, NOW())
-    ON CONFLICT (discord_id)
-    DO UPDATE SET wallet = EXCLUDED.wallet, faction = EXCLUDED.faction, updated_at = NOW();
-    `,
-    [discordId, wallet, faction]
-  );
-}
-
-async function recordRaid(discordId, wallet, faction, convoyId, route, legendary, success, reward) {
-  await pool.query(
-    `
-    INSERT INTO raid_logs (discord_id, wallet, faction, convoy_id, route, legendary, success, reward)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-    `,
-    [discordId, wallet, faction, convoyId, route, legendary, success, reward]
-  );
-
-  await pool.query(
-    `
-    INSERT INTO raid_balances (
-      discord_id,
-      wallet,
-      faction,
-      payout_nkfe,
-      lifetime_nkfe,
-      total_successes,
-      total_attempts,
-      legendary_successes,
-      weekly_nkfe,
-      weekly_successes,
-      weekly_attempts,
-      weekly_legendary_successes,
-      updated_at
-    )
-    VALUES ($1, $2, $3, $4, $4, $5, 1, $6, $4, $5, 1, $6, NOW())
-    ON CONFLICT (discord_id)
-    DO UPDATE SET
-      wallet = EXCLUDED.wallet,
-      faction = COALESCE(raid_balances.faction, EXCLUDED.faction),
-      payout_nkfe = raid_balances.payout_nkfe + EXCLUDED.payout_nkfe,
-      lifetime_nkfe = raid_balances.lifetime_nkfe + EXCLUDED.lifetime_nkfe,
-      total_successes = raid_balances.total_successes + EXCLUDED.total_successes,
-      total_attempts = raid_balances.total_attempts + 1,
-      legendary_successes = raid_balances.legendary_successes + EXCLUDED.legendary_successes,
-      weekly_nkfe = raid_balances.weekly_nkfe + EXCLUDED.weekly_nkfe,
-      weekly_successes = raid_balances.weekly_successes + EXCLUDED.weekly_successes,
-      weekly_attempts = raid_balances.weekly_attempts + 1,
-      weekly_legendary_successes = raid_balances.weekly_legendary_successes + EXCLUDED.weekly_legendary_successes,
-      updated_at = NOW();
-    `,
-    [discordId, wallet, faction, reward, success ? 1 : 0, legendary && success ? 1 : 0]
-  );
 }
 
 function getFactionLabel(factionKey) {
