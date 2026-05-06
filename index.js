@@ -1144,20 +1144,6 @@ async function fetchRecentConvoyActions() {
           if (CONVOY_ACTIONS.includes(actionName)) foundActions.push({ contract, actionName, action });
         }
 
-
-      try {
-        const response = await fetch(url);
-        const json = await response.json();
-
-        if (!response.ok || !Array.isArray(json.actions)) {
-          throw new Error(json.message || json.error?.what || `Invalid response from ${historyApi}`);
-        }
-
-        for (const action of json.actions) {
-          const actionName = action.act?.name || action.name || action.action;
-          if (CONVOY_ACTIONS.includes(actionName)) foundActions.push({ contract, actionName, action });
-        }
-
         contractActionsLoaded = true;
         break;
       } catch (error) {
@@ -1181,6 +1167,30 @@ function buildRaidButtonRow(raidId, disabled = false) {
       .setStyle(ButtonStyle.Danger)
       .setDisabled(disabled)
   );
+}
+
+function buildRaidClosedContent(content, convoy) {
+  return [
+    content,
+    "",
+    "📊 **Convoy Raid Closed**",
+    `Attempts: **${convoy.attempts}**`,
+    `Successful raids: **${convoy.successes}**`,
+    `Total NKFE looted: **${convoy.totalReward} $NKFE**`
+  ].join("\n");
+}
+
+async function closeRaidWindow(convoy, raidMessage, content) {
+  activeConvoys.delete(convoy.id);
+
+  try {
+    await raidMessage.edit({
+      content: buildRaidClosedContent(content, convoy),
+      components: [buildRaidButtonRow(convoy.id, true)]
+    });
+  } catch (error) {
+    console.log(`Could not close raid window for convoy ${convoy.id}:`, error.message);
+  }
 }
 
 function getActiveConvoy(raidId) {
@@ -1259,33 +1269,8 @@ async function openRaidWindow({ route, convoyId, raidId, wallet, legendary }) {
     components: [buildRaidButtonRow(convoy.id)]
   });
 
-  setTimeout(async () => {
-    activeConvoys.delete(convoy.id);
-
-    const closedContent = [
-      content,
-      "",
-      "📊 **Convoy Raid Closed**",
-      `Attempts: **${convoy.attempts}**`,
-      `Successful raids: **${convoy.successes}**`,
-      `Total NKFE looted: **${convoy.totalReward} $NKFE**`
-    ].join("\n");
-
-    try {
-      await raidMessage.edit({
-        content: closedContent,
-        components: [buildRaidButtonRow(convoy.id, true)]
-      });
-
-  setTimeout(async () => {
-    activeConvoys.delete(convoy.id);
-
-    try {
-      await raidMessage.edit({ components: [buildRaidButtonRow(convoy.id, true)] });
-
-    } catch (error) {
-      console.log(`Could not disable raid button for convoy ${convoy.id}:`, error.message);
-    }
+  setTimeout(() => {
+    closeRaidWindow(convoy, raidMessage, content);
   }, RAID_WINDOW_SECONDS * 1000);
 }
 
