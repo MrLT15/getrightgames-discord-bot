@@ -589,6 +589,23 @@ function buildProfileActionRows() {
   ];
 }
 
+function dedupeCommandsByName(commands) {
+  const uniqueCommands = [];
+  const seenNames = new Set();
+
+  for (const command of commands) {
+    if (seenNames.has(command.name)) {
+      console.warn(`Skipping duplicate slash command registration for /${command.name}.`);
+      continue;
+    }
+
+    seenNames.add(command.name);
+    uniqueCommands.push(command);
+  }
+
+  return uniqueCommands;
+}
+
 async function registerCommands() {
   const commands = [
     new SlashCommandBuilder()
@@ -618,21 +635,6 @@ async function registerCommands() {
       .toJSON(),
 
     ...rankCommands,
-
-    new SlashCommandBuilder()
-      .setName("rank")
-      .setDescription("Show your Convoy Command rank and XP progress.")
-      .toJSON(),
-
-    new SlashCommandBuilder()
-      .setName("rankleaderboard")
-      .setDescription("Show the Convoy Command XP leaderboard.")
-      .toJSON(),
-
-    new SlashCommandBuilder()
-      .setName("rankrewards")
-      .setDescription("Show Convoy Command rank milestones and XP rules.")
-      .toJSON(),
 
     new SlashCommandBuilder()
       .setName("testconvoy")
@@ -690,9 +692,11 @@ async function registerCommands() {
       .toJSON()
   ];
 
+  const uniqueCommands = dedupeCommandsByName(commands);
+
   const rest = new REST({ version: "10" }).setToken(TOKEN);
-  await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands });
-  console.log("Slash commands registered.");
+  await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: uniqueCommands });
+  console.log(`Slash commands registered (${uniqueCommands.length} unique commands).`);
 }
 
 async function getAssets(wallet) {
