@@ -1,13 +1,6 @@
 const {
   Client,
-  GatewayIntentBits,
-  REST,
-  Routes,
-  SlashCommandBuilder,
-  PermissionFlagsBits,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle
+  GatewayIntentBits
 } = require("discord.js");
 
 // Node 18+ includes global fetch. Do not require node-fetch v3 from CommonJS.
@@ -35,13 +28,11 @@ const {
   LEVEL_FIELDS,
   RAIDER_FACTIONS
 } = require("./src/config/constants");
-const {
-  rankCommands,
-  createRankFeature
-} = require("./src/features/ranks");
+const { createRankFeature } = require("./src/features/ranks");
 const { createRaidFeature } = require("./src/features/raids");
 const { createProfileFeature } = require("./src/features/profile");
 const { initDatabase } = require("./src/db/init");
+const { registerCommands } = require("./src/bot/commands");
 
 let verifiedWallets = {};
 let scheduledRefreshRunning = false;
@@ -500,116 +491,6 @@ const profileFeature = createProfileFeature({
   raidFeature,
   getFactionLabel
 });
-
-function dedupeCommandsByName(commands) {
-  const uniqueCommands = [];
-  const seenNames = new Set();
-
-  for (const command of commands) {
-    if (seenNames.has(command.name)) {
-      console.warn(`Skipping duplicate slash command registration for /${command.name}.`);
-      continue;
-    }
-
-    seenNames.add(command.name);
-    uniqueCommands.push(command);
-  }
-
-  return uniqueCommands;
-}
-
-async function registerCommands() {
-  const commands = [
-    new SlashCommandBuilder()
-      .setName("verify")
-      .setDescription("Verify your WAX wallet and receive NFT roles.")
-      .addStringOption(option => option.setName("wallet").setDescription("Your WAX wallet").setRequired(true))
-      .toJSON(),
-
-    new SlashCommandBuilder()
-      .setName("refresh")
-      .setDescription("Refresh your NFT roles using your last verified wallet.")
-      .toJSON(),
-
-    new SlashCommandBuilder()
-      .setName("stats")
-      .setDescription("Show GetRight Games verified wallet and NFT role stats.")
-      .toJSON(),
-
-    new SlashCommandBuilder()
-      .setName("leaderboard")
-      .setDescription("Show the GetRight Games NFT role leaderboard.")
-      .toJSON(),
-
-    new SlashCommandBuilder()
-      .setName("profile")
-      .setDescription("Show your NiftyKicks Factory NFT profile.")
-      .toJSON(),
-
-    ...rankCommands,
-
-    new SlashCommandBuilder()
-      .setName("testconvoy")
-      .setDescription("Admin: test posting a convoy activity message to general chat.")
-      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-      .toJSON(),
-
-    new SlashCommandBuilder()
-      .setName("raid")
-      .setDescription("Attempt to raid the newest active convoy. Use alert buttons to raid specific convoys.")
-      .toJSON(),
-
-    new SlashCommandBuilder()
-      .setName("raidstats")
-      .setDescription("Show your Convoy Raiders stats and NKFE balance.")
-      .toJSON(),
-
-    new SlashCommandBuilder()
-      .setName("raidleaderboard")
-      .setDescription("Show the weekly Convoy Raiders leaderboard.")
-      .toJSON(),
-
-    new SlashCommandBuilder()
-      .setName("raidfactions")
-      .setDescription("Show Convoy Raiders faction standings.")
-      .toJSON(),
-
-    new SlashCommandBuilder()
-      .setName("joinfaction")
-      .setDescription("Join a Convoy Raiders faction.")
-      .addStringOption(option =>
-        option
-          .setName("faction")
-          .setDescription("Choose your raider faction.")
-          .setRequired(true)
-          .addChoices(
-            { name: "🐺 Iron Wolves", value: "iron_wolves" },
-            { name: "🌌 Neon Bandits", value: "neon_bandits" },
-            { name: "🐍 Steel Serpents", value: "steel_serpents" },
-            { name: "🕶️ Shadow Couriers", value: "shadow_couriers" }
-          )
-      )
-      .toJSON(),
-
-    new SlashCommandBuilder()
-      .setName("raidpayouts")
-      .setDescription("Admin: show NKFE payouts owed to raiders.")
-      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-      .toJSON(),
-
-    new SlashCommandBuilder()
-      .setName("resetraidpayouts")
-      .setDescription("Admin: reset current raid payout balances after manual payment.")
-      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-      .toJSON()
-  ];
-
-  const uniqueCommands = dedupeCommandsByName(commands);
-
-  const rest = new REST({ version: "10" }).setToken(TOKEN);
-  await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: uniqueCommands });
-  console.log(`Slash commands registered (${uniqueCommands.length} unique commands).`);
-}
 
 async function getAssets(wallet) {
   let allAssets = [];
@@ -1129,7 +1010,7 @@ client.once("clientReady", async () => {
   verifiedWallets = await loadWalletsFromDatabase();
   console.log(`Loaded ${Object.keys(verifiedWallets).length} saved wallets from database.`);
 
-  await registerCommands();
+  await registerCommands({ token: TOKEN, clientId: CLIENT_ID, guildId: GUILD_ID });
 
   cron.schedule("0 * * * *", async () => {
     await refreshAllVerifiedWallets();
