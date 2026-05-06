@@ -4,7 +4,6 @@ const {
 } = require("discord.js");
 
 // Node 18+ includes global fetch. Do not require node-fetch v3 from CommonJS.
-const cron = require("node-cron");
 const { Pool } = require("pg");
 
 const TOKEN = process.env.DISCORD_TOKEN;
@@ -34,6 +33,8 @@ const { createProfileFeature } = require("./src/features/profile");
 const { initDatabase } = require("./src/db/init");
 const { registerCommands } = require("./src/bot/commands");
 const { createInteractionHandler } = require("./src/bot/interactions");
+const { startSchedules } = require("./src/bot/schedules");
+const { registerWelcomeHandler } = require("./src/bot/welcome");
 
 let verifiedWallets = {};
 let scheduledRefreshRunning = false;
@@ -1029,53 +1030,14 @@ client.once("clientReady", async () => {
 
   await registerCommands({ token: TOKEN, clientId: CLIENT_ID, guildId: GUILD_ID });
 
-  cron.schedule("0 * * * *", async () => {
-    await refreshAllVerifiedWallets();
+  startSchedules({
+    refreshAllVerifiedWallets,
+    postDailyLeaderboard,
+    raidFeature
   });
-  console.log("Automatic wallet refresh scheduled every 1 hour.");
-
-  cron.schedule("0 9 * * *", async () => {
-    await postDailyLeaderboard();
-  }, { timezone: "America/Los_Angeles" });
-  console.log("Daily leaderboard post scheduled for 9:00 AM Pacific.");
-
-  cron.schedule("0 17 * * 0", async () => {
-    await raidFeature.postWeeklyRaidLeaderboardAndReset();
-  }, { timezone: "America/Los_Angeles" });
-  console.log("Weekly raid leaderboard post scheduled for Sundays at 5:00 PM Pacific.");
-
-  setInterval(async () => {
-    await raidFeature.checkConvoyActivity();
-  }, 20000);
-  console.log("Real-time convoy activity tracker started. Checking every 20 seconds.");
-  console.log("Convoy Raiders mini-game is active.");
 });
 
-client.on("guildMemberAdd", async member => {
-  try {
-    await member.send(
-      `👋 Welcome to **GetRight Games**!
-
-` +
-      `To verify your WAX wallet and unlock NFT-based Discord roles, go to the server and run:
-
-` +
-      `/verify yourwallet.wam
-
-` +
-      `After you verify once, you can use:
-
-` +
-      `/refresh
-
-` +
-      `This will update your roles whenever your NFTs change.`
-    );
-  } catch (error) {
-    console.log(`Could not DM new member ${member.id}. They may have DMs disabled.`);
-  }
-});
-
+registerWelcomeHandler(client);
 client.on("interactionCreate", handleInteraction);
 
 client.login(TOKEN);
