@@ -28,7 +28,7 @@ const {
   LEADERBOARD_CHANNEL_ID,
   GENERAL_CHAT_CHANNEL_ID,
   WAX_CHAIN_API,
-  WAX_HISTORY_API,
+  WAX_HISTORY_APIS,
   CONTRACT_ACCOUNTS,
   CONVOY_CONTRACTS,
   CONVOY_ACTIONS,
@@ -352,7 +352,8 @@ async function registerCommands() {
 
     new SlashCommandBuilder()
       .setName("testconvoy")
-      .setDescription("Test posting a convoy activity message to general chat.")
+      .setDescription("Admin: test posting a convoy activity message to general chat.")
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
       .toJSON(),
 
     new SlashCommandBuilder()
@@ -867,35 +868,41 @@ async function refreshAllVerifiedWallets() {
   }
 
   scheduledRefreshRunning = true;
-  console.log("Starting scheduled wallet refresh...");
-
-  const guild = await client.guilds.fetch(GUILD_ID);
   let checked = 0;
   let failed = 0;
 
-  for (const discordId of Object.keys(verifiedWallets)) {
-    const wallet = verifiedWallets[discordId];
+  try {
+    console.log("Starting scheduled wallet refresh...");
 
-    try {
-      const member = await guild.members.fetch(discordId);
-      await processWalletByMember(guild, member, wallet, false, true);
-      checked++;
-      console.log(`Refreshed ${wallet} for Discord user ${discordId}`);
-      await sleep(1500);
-    } catch (error) {
-      if (error?.code === 10007 || error?.status === 404) {
-        await removeWalletFromDatabase(discordId);
-        console.log(`Removed stale wallet ${wallet} for Discord user ${discordId}: member no longer in guild.`);
-        continue;
+    const guild = await client.guilds.fetch(GUILD_ID);
+
+    for (const discordId of Object.keys(verifiedWallets)) {
+      const wallet = verifiedWallets[discordId];
+
+      try {
+        const member = await guild.members.fetch(discordId);
+        await processWalletByMember(guild, member, wallet, false, true);
+        checked++;
+        console.log(`Refreshed ${wallet} for Discord user ${discordId}`);
+        await sleep(1500);
+      } catch (error) {
+        if (error?.code === 10007 || error?.status === 404) {
+          await removeWalletFromDatabase(discordId);
+          console.log(`Removed stale wallet ${wallet} for Discord user ${discordId}: member no longer in guild.`);
+          continue;
+        }
+
+        failed++;
+        console.error(`Failed to refresh ${wallet} for Discord user ${discordId}:`, error);
       }
-
-      failed++;
-      console.error(`Failed to refresh ${wallet} for Discord user ${discordId}:`, error);
     }
-  }
 
-  scheduledRefreshRunning = false;
-  console.log(`Scheduled refresh complete. Checked: ${checked}. Failed: ${failed}.`);
+    console.log(`Scheduled refresh complete. Checked: ${checked}. Failed: ${failed}.`);
+  } catch (error) {
+    console.error("Scheduled wallet refresh failed:", error);
+  } finally {
+    scheduledRefreshRunning = false;
+  }
 }
 
 async function buildStatsMessage(guild) {
@@ -1114,19 +1121,33 @@ async function fetchRecentConvoyActions() {
   const foundActions = [];
 
   for (const contract of CONVOY_CONTRACTS) {
-    const url = `${WAX_HISTORY_API}/v2/history/get_actions?account=${contract}&sort=desc&limit=25`;
+    let contractActionsLoaded = false;
 
-    try {
-      const response = await fetch(url);
-      const json = await response.json();
-      const actions = json.actions || [];
+    for (const historyApi of WAX_HISTORY_APIS) {
+      const url = `${historyApi}/v2/history/get_actions?account=${contract}&sort=desc&limit=25`;
 
-      for (const action of actions) {
-        const actionName = action.act?.name || action.name || action.action;
-        if (CONVOY_ACTIONS.includes(actionName)) foundActions.push({ contract, actionName, action });
+      try {
+        const response = await fetch(url);
+        const json = await response.json();
+
+        if (!response.ok || !Array.isArray(json.actions)) {
+          throw new Error(json.message || json.error?.what || `Invalid response from ${historyApi}`);
+        }
+
+        for (const action of json.actions) {
+          const actionName = action.act?.name || action.name || action.action;
+          if (CONVOY_ACTIONS.includes(actionName)) foundActions.push({ contract, actionName, action });
+        }
+
+        contractActionsLoaded = true;
+        break;
+      } catch (error) {
+        console.log(`Failed to fetch recent actions for ${contract} from ${historyApi}:`, error.message);
       }
-    } catch (error) {
-      console.log(`Failed to fetch recent actions for ${contract}:`, error.message);
+    }
+
+    if (!contractActionsLoaded) {
+      console.log(`Failed to fetch recent actions for ${contract} from all configured WAX history APIs.`);
     }
   }
 
