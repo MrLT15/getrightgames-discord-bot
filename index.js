@@ -1130,6 +1130,7 @@ async function fetchRecentConvoyActions() {
 
     for (const historyApi of WAX_HISTORY_APIS) {
       const url = `${historyApi}/v2/history/get_actions?account=${contract}&sort=desc&limit=25`;
+<<<<<<< codex/review-code-yaq2st
 
       try {
         const response = await fetch(url);
@@ -1144,6 +1145,22 @@ async function fetchRecentConvoyActions() {
           if (CONVOY_ACTIONS.includes(actionName)) foundActions.push({ contract, actionName, action });
         }
 
+=======
+
+      try {
+        const response = await fetch(url);
+        const json = await response.json();
+
+        if (!response.ok || !Array.isArray(json.actions)) {
+          throw new Error(json.message || json.error?.what || `Invalid response from ${historyApi}`);
+        }
+
+        for (const action of json.actions) {
+          const actionName = action.act?.name || action.name || action.action;
+          if (CONVOY_ACTIONS.includes(actionName)) foundActions.push({ contract, actionName, action });
+        }
+
+>>>>>>> main
         contractActionsLoaded = true;
         break;
       } catch (error) {
@@ -1244,6 +1261,7 @@ async function openRaidWindow({ route, convoyId, raidId, wallet, legendary }) {
     content,
     components: [buildRaidButtonRow(convoy.id)]
   });
+<<<<<<< codex/review-code-yaq2st
 
   setTimeout(async () => {
     activeConvoys.delete(convoy.id);
@@ -1262,6 +1280,14 @@ async function openRaidWindow({ route, convoyId, raidId, wallet, legendary }) {
         content: closedContent,
         components: [buildRaidButtonRow(convoy.id, true)]
       });
+=======
+
+  setTimeout(async () => {
+    activeConvoys.delete(convoy.id);
+
+    try {
+      await raidMessage.edit({ components: [buildRaidButtonRow(convoy.id, true)] });
+>>>>>>> main
     } catch (error) {
       console.log(`Could not disable raid button for convoy ${convoy.id}:`, error.message);
     }
@@ -1407,10 +1433,13 @@ async function handleRaid(interaction, raidId = null) {
     reward
   );
 
+<<<<<<< codex/review-code-yaq2st
   convoy.attempts++;
   if (success) convoy.successes++;
   convoy.totalReward += reward;
 
+=======
+>>>>>>> main
   const successMessages = convoy.legendary
     ? [
         "You breached the legendary convoy and escaped with premium cargo.",
