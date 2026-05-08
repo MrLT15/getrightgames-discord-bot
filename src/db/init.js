@@ -40,6 +40,7 @@ async function initRaidSchema(pool) {
       legendary BOOLEAN NOT NULL DEFAULT FALSE,
       success BOOLEAN NOT NULL,
       reward INTEGER NOT NULL DEFAULT 0,
+      convoy_wallet TEXT,
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
   `);
@@ -54,6 +55,7 @@ async function initRaidSchema(pool) {
   await pool.query(`ALTER TABLE raid_balances ADD COLUMN IF NOT EXISTS weekly_successes INTEGER NOT NULL DEFAULT 0;`);
   await pool.query(`ALTER TABLE raid_balances ADD COLUMN IF NOT EXISTS weekly_attempts INTEGER NOT NULL DEFAULT 0;`);
   await pool.query(`ALTER TABLE raid_balances ADD COLUMN IF NOT EXISTS weekly_legendary_successes INTEGER NOT NULL DEFAULT 0;`);
+  await pool.query(`ALTER TABLE raid_logs ADD COLUMN IF NOT EXISTS convoy_wallet TEXT;`);
 }
 
 async function initDatabase(pool, databaseUrl) {

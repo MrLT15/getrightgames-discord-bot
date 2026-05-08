@@ -63,7 +63,8 @@ const {
   ensureRaiderProfile,
   getRaiderProfile,
   setRaiderFaction,
-  recordRaid
+  recordRaid,
+  revertSelfRaids
 } = createRaiderRepository({ pool });
 
 const waxService = createWaxService({
@@ -148,6 +149,7 @@ const raidFeature = createRaidFeature({
   ensureRaiderProfile,
   getRaiderProfile,
   recordRaid,
+  revertSelfRaids,
   rankFeature,
   getFactionLabel,
   getVerifiedWallets: () => verifiedWallets,

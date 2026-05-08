@@ -87,6 +87,12 @@ const adminCommands = [
     .setName("resetraidpayouts")
     .setDescription("Admin: reset current raid payout balances after manual payment.")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .toJSON(),
+
+  new SlashCommandBuilder()
+    .setName("revertselfraids")
+    .setDescription("Admin: revert any recorded raids where players raided their own convoys.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .toJSON()
 ];
 

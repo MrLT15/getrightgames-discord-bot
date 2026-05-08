@@ -17,6 +17,16 @@ const {
 
 const RAID_BUTTON_PREFIX = "raid_convoy:";
 
+function normalizeWallet(wallet) {
+  return String(wallet || "").trim().toLowerCase();
+}
+
+function isSameWallet(firstWallet, secondWallet) {
+  const first = normalizeWallet(firstWallet);
+  const second = normalizeWallet(secondWallet);
+  return Boolean(first && second && first === second);
+}
+
 function createRaidFeature({
   client,
   pool,
@@ -25,6 +35,7 @@ function createRaidFeature({
   ensureRaiderProfile,
   getRaiderProfile,
   recordRaid,
+  revertSelfRaids,
   rankFeature,
   getFactionLabel,
   getVerifiedWallets,
@@ -325,6 +336,11 @@ function createRaidFeature({
       return;
     }
 
+    if (isSameWallet(wallet, convoy.wallet)) {
+      await interaction.editReply("You cannot raid your own convoy. Pick another active convoy alert or wait for someone else's convoy.");
+      return;
+    }
+
     if (convoy.attemptedDiscordIds.has(interaction.user.id)) {
       await interaction.editReply("You already attempted to raid this convoy. Pick another active convoy alert or wait for the next one.");
       return;
@@ -348,7 +364,8 @@ function createRaidFeature({
       convoy.route,
       convoy.legendary,
       success,
-      reward
+      reward,
+      convoy.wallet
     );
 
     const rankAward = await rankFeature.awardRankXp(interaction.user.id, wallet, convoy.id, convoy.legendary, success);
@@ -616,6 +633,14 @@ function createRaidFeature({
     }
   }
 
+  async function revertRecordedSelfRaids() {
+    if (typeof revertSelfRaids !== "function") {
+      return { reverted_raids: 0, reverted_attempts: 0, reverted_successes: 0, reverted_reward: 0, reverted_xp: 0 };
+    }
+
+    return revertSelfRaids();
+  }
+
   function isRaidButton(customId) {
     return customId.startsWith(RAID_BUTTON_PREFIX);
   }
@@ -638,6 +663,7 @@ function createRaidFeature({
     sendRaidLeaderboard,
     sendRaidFactions,
     postWeeklyRaidLeaderboardAndReset,
+    revertRecordedSelfRaids,
     isRaidButton,
     getRaidIdFromButton,
     rollNkfeReward
@@ -646,5 +672,7 @@ function createRaidFeature({
 
 module.exports = {
   RAID_BUTTON_PREFIX,
-  createRaidFeature
+  createRaidFeature,
+  isSameWallet,
+  normalizeWallet
 };

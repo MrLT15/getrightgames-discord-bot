@@ -74,7 +74,8 @@ function checkCommands() {
     "joinfaction",
     "testconvoy",
     "raidpayouts",
-    "resetraidpayouts"
+    "resetraidpayouts",
+    "revertselfraids"
   ];
 
   assert(typeof registerCommands === "function", "registerCommands must be a function");
@@ -98,7 +99,7 @@ function checkRepositories() {
     assert(typeof walletRepository[name] === "function", `walletRepository.${name} must be a function`);
   }
 
-  for (const name of ["ensureRaiderProfile", "getRaiderProfile", "setRaiderFaction", "recordRaid"]) {
+  for (const name of ["ensureRaiderProfile", "getRaiderProfile", "setRaiderFaction", "recordRaid", "revertSelfRaids"]) {
     assert(typeof raiderRepository[name] === "function", `raiderRepository.${name} must be a function`);
   }
 
@@ -168,7 +169,7 @@ function checkServices() {
 
 function checkFeatures() {
   const { RANKS, rankCommands, getRankByXp, calculateRankProgress, createRankFeature } = requireFromRoot("src/features/ranks.js");
-  const { RAID_BUTTON_PREFIX, createRaidFeature } = requireFromRoot("src/features/raids.js");
+  const { RAID_BUTTON_PREFIX, createRaidFeature, isSameWallet } = requireFromRoot("src/features/raids.js");
   const { PROFILE_BUTTON_PREFIX, PROFILE_ACTIONS, createProfileFeature } = requireFromRoot("src/features/profile.js");
   const pool = createPoolStub();
 
@@ -200,6 +201,8 @@ function checkFeatures() {
   }
 
   assert(RAID_BUTTON_PREFIX === "raid_convoy:", "Unexpected raid button prefix");
+  assert(isSameWallet("PLAYER.WAM ", "player.wam"), "isSameWallet should normalize wallet case and whitespace");
+  assert(!isSameWallet("player.wam", "other.wam"), "isSameWallet should reject different wallets");
   const raidFeature = createRaidFeature({
     client: {},
     pool,
@@ -208,6 +211,7 @@ function checkFeatures() {
     ensureRaiderProfile: async () => {},
     getRaiderProfile: async () => null,
     recordRaid: async () => {},
+    revertSelfRaids: async () => ({ reverted_raids: 0 }),
     rankFeature,
     getFactionLabel: () => "No faction",
     getVerifiedWallets: () => ({}),
@@ -223,6 +227,7 @@ function checkFeatures() {
     "sendRaidLeaderboard",
     "sendRaidFactions",
     "postWeeklyRaidLeaderboardAndReset",
+    "revertRecordedSelfRaids",
     "isRaidButton",
     "getRaidIdFromButton"
   ]) {

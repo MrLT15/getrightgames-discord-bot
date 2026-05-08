@@ -209,6 +209,20 @@ function createInteractionHandler({
       return;
     }
 
+    if (interaction.commandName === "revertselfraids") {
+      const result = await raidFeature.revertRecordedSelfRaids();
+      await interaction.editReply(
+        "🧹 **Self-Raid Revert Complete**\n\n" +
+        `Reverted raids: **${result.reverted_raids || 0}**\n` +
+        `Attempts removed: **${result.reverted_attempts || 0}**\n` +
+        `Successes removed: **${result.reverted_successes || 0}**\n` +
+        `NKFE removed: **${result.reverted_reward || 0}**\n` +
+        `Rank XP removed: **${result.reverted_xp || 0}**\n\n` +
+        "Note: only raids with a stored convoy owner wallet can be identified and reverted."
+      );
+      return;
+    }
+
     await handleWalletCommand(interaction);
   }
 
