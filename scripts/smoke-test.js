@@ -53,6 +53,12 @@ function createPoolStub() {
   };
 }
 
+function checkConfig() {
+  const { RAID_WINDOW_SECONDS } = requireFromRoot("src/config/constants.js");
+  assert(Number.isInteger(RAID_WINDOW_SECONDS) && RAID_WINDOW_SECONDS >= 1, "RAID_WINDOW_SECONDS must be a positive integer");
+  log(`Raid duration is configurable and currently set to ${RAID_WINDOW_SECONDS} seconds`);
+}
+
 function checkCommands() {
   const { buildCommands, dedupeCommandsByName, registerCommands } = requireFromRoot("src/bot/commands.js");
   const commands = buildCommands();
@@ -311,6 +317,7 @@ function checkBotInfrastructure() {
 
 function main() {
   checkSyntax();
+  checkConfig();
   checkCommands();
   checkRepositories();
   checkServices();
