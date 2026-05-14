@@ -56,6 +56,39 @@ async function initRaidSchema(pool) {
   await pool.query(`ALTER TABLE raid_balances ADD COLUMN IF NOT EXISTS weekly_attempts INTEGER NOT NULL DEFAULT 0;`);
   await pool.query(`ALTER TABLE raid_balances ADD COLUMN IF NOT EXISTS weekly_legendary_successes INTEGER NOT NULL DEFAULT 0;`);
   await pool.query(`ALTER TABLE raid_logs ADD COLUMN IF NOT EXISTS convoy_wallet TEXT;`);
+
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS raid_withdrawals (
+      id SERIAL PRIMARY KEY,
+      discord_id TEXT NOT NULL,
+      wallet TEXT NOT NULL,
+      amount_nkfe INTEGER NOT NULL,
+      gross_amount_units TEXT,
+      fee_units TEXT,
+      net_amount_units TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      transaction_id TEXT,
+      tx_id TEXT,
+      payout_error TEXT,
+      requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      processed_at TIMESTAMPTZ,
+      completed_at TIMESTAMPTZ
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS raid_nkfe_ledger (
+      id SERIAL PRIMARY KEY,
+      discord_id TEXT NOT NULL,
+      wallet TEXT,
+      entry_type TEXT NOT NULL,
+      amount_units TEXT NOT NULL,
+      fee_units TEXT,
+      metadata JSONB DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
 }
 
 async function initDatabase(pool, databaseUrl) {

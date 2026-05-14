@@ -35,6 +35,7 @@ const { createWalletRepository } = require("./src/db/wallets");
 const { createRaiderRepository } = require("./src/db/raiders");
 const { createWaxService } = require("./src/services/wax");
 const { createAssetService } = require("./src/services/assets");
+const { executeNkfePayout } = require("./src/services/payouts");
 const { ROLE_RULES, createRoleService } = require("./src/services/roles");
 const { registerCommands } = require("./src/bot/commands");
 const { createInteractionHandler } = require("./src/bot/interactions");
@@ -64,7 +65,8 @@ const {
   getRaiderProfile,
   setRaiderFaction,
   recordRaid,
-  revertSelfRaids
+  revertSelfRaids,
+  requestRaidWithdrawal
 } = createRaiderRepository({ pool });
 
 const waxService = createWaxService({
@@ -182,6 +184,8 @@ const handleInteraction = createInteractionHandler({
   getVerifiedWallets: () => verifiedWallets,
   getVerifiedWallet,
   setRaiderFaction,
+  requestRaidWithdrawal,
+  executeNkfePayout,
   processWalletByMember,
   refreshAllVerifiedWallets,
   buildStatsMessage,

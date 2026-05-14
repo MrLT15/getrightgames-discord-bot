@@ -6,6 +6,8 @@ function createInteractionHandler({
   getVerifiedWallets,
   getVerifiedWallet,
   setRaiderFaction,
+  requestRaidWithdrawal,
+  executeNkfePayout,
   processWalletByMember,
   buildStatsMessage,
   buildLeaderboardMessage,
@@ -72,9 +74,9 @@ function createInteractionHandler({
 
     const lines = result.rows.map(row => `${row.wallet} — **${row.payout_nkfe} NKFE** — <@${row.discord_id}>`);
     await interaction.editReply(
-      "💰 **Convoy Raiders Manual Payout List**\n\n" +
+      "💰 **Convoy Raiders Payout Audit List**\n\n" +
       lines.join("\n") +
-      "\n\nAfter paying from the treasury wallet, run `/resetraidpayouts`."
+      "\n\nPlayers should use `/raidwithdraw` for self-service payouts. Use manual payouts and `/resetraidpayouts` only as an admin backup/correction path."
     );
   }
 
@@ -183,6 +185,44 @@ function createInteractionHandler({
       return;
     }
 
+    if (interaction.commandName === "raidwithdraw") {
+      const wallet = await getVerifiedWallet(interaction.user.id);
+      if (!wallet) {
+        await interaction.editReply("No verified wallet found. Run `/verify wallet.wam` first, then try `/raidwithdraw` again.");
+        return;
+      }
+
+      const amount = interaction.options.getInteger("amount");
+      const result = await requestRaidWithdrawal(interaction.user.id, wallet, amount, executeNkfePayout);
+
+      if (result.success) {
+        await interaction.editReply([
+          "✅ **GetRight Games NKFE withdrawal sent.**",
+          "",
+          `Gross: **${result.grossAmount} NKFE**`,
+          `Fee: **${result.feeAmount} NKFE**`,
+          `Net Sent: **${result.netAmount} NKFE**`,
+          `Wallet: **${wallet}**`,
+          `Remaining Balance: **${result.remainingBalance} NKFE**`,
+          `Tx: **${result.transactionId || "pending/unknown"}**`,
+          result.completionWarning ? `Warning: ${result.completionWarning}` : null
+        ].filter(Boolean).join("\n"));
+        return;
+      }
+
+      if (result.code === "no_balance" || result.code === "insufficient_balance" || result.code === "invalid_amount" || result.code === "cooldown") {
+        await interaction.editReply(result.message);
+        return;
+      }
+
+      await interaction.editReply([
+        "❌ **Withdrawal failed and your balance was not lost/reverted.**",
+        `Reason: ${result.message || "Unknown payout error."}`,
+        result.refunded ? "Your pending debit was refunded back to your raid payout balance." : null
+      ].filter(Boolean).join("\n"));
+      return;
+    }
+
     if (interaction.commandName === "joinfaction") {
       await handleJoinFactionCommand(interaction);
       return;
@@ -205,7 +245,7 @@ function createInteractionHandler({
 
     if (interaction.commandName === "resetraidpayouts") {
       await pool.query("UPDATE raid_balances SET payout_nkfe = 0, updated_at = NOW()");
-      await interaction.editReply("Convoy Raiders current payout balances have been reset to 0. Lifetime and weekly stats were preserved.");
+      await interaction.editReply("Convoy Raiders current payout balances have been reset to 0 for admin correction/manual-backup purposes. Lifetime and weekly stats were preserved. Players should normally use `/raidwithdraw`.");
       return;
     }
 

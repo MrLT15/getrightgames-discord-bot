@@ -470,14 +470,15 @@ function createRaidFeature({
       `Player: **${displayName}**\n` +
       `Wallet: **${wallet}**\n` +
       `Faction: **${getFactionLabel(row?.faction)}**\n\n` +
-      `Current Payout Balance: **${row?.payout_nkfe || 0} $NKFE**\n` +
+      `Withdrawable Payout Balance: **${row?.payout_nkfe || 0} $NKFE**\n` +
       `This Week's Raid Earnings: **${row?.weekly_nkfe || 0} $NKFE**\n` +
       `Lifetime NKFE Earned: **${row?.lifetime_nkfe || 0} $NKFE**\n` +
       `Raid Attempts: **${attempts}**\n` +
       `Successful Raids: **${successes}**\n` +
       `Failed Raids: **${failedRaids}**\n` +
       `Success Rate: **${successRate}%**\n` +
-      `Legendary Convoy Wins: **${row?.legendary_successes || 0}**`
+      `Legendary Convoy Wins: **${row?.legendary_successes || 0}**\n\n` +
+      "Use `/raidwithdraw` to withdraw your available payout balance."
     );
   }
 

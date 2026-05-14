@@ -43,6 +43,18 @@ const raidCommands = [
     .toJSON(),
 
   new SlashCommandBuilder()
+    .setName("raidwithdraw")
+    .setDescription("Withdraw your GetRight Games raid $NKFE payout balance.")
+    .addIntegerOption(option =>
+      option
+        .setName("amount")
+        .setDescription("Whole $NKFE amount to withdraw. Leave blank to withdraw your full balance.")
+        .setRequired(false)
+        .setMinValue(1)
+    )
+    .toJSON(),
+
+  new SlashCommandBuilder()
     .setName("raidleaderboard")
     .setDescription("Show the weekly Convoy Raiders leaderboard.")
     .toJSON(),
@@ -79,13 +91,13 @@ const adminCommands = [
 
   new SlashCommandBuilder()
     .setName("raidpayouts")
-    .setDescription("Admin: show NKFE payouts owed to raiders.")
+    .setDescription("Admin: audit NKFE payout balances owed to raiders.")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .toJSON(),
 
   new SlashCommandBuilder()
     .setName("resetraidpayouts")
-    .setDescription("Admin: reset current raid payout balances after manual payment.")
+    .setDescription("Admin: reset raid payout balances for manual backup/correction.")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .toJSON(),
 

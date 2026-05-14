@@ -1,3 +1,44 @@
+const { toUnits, formatTokenAmount, calculateFeeUnits } = require("../services/payouts");
+const {
+  NKFE_SYSTEM_ENABLED,
+  NKFE_WITHDRAWALS_ENABLED,
+  NKFE_PAYOUTS_ENABLED,
+  NKFE_TOKEN_DECIMALS,
+  NKFE_WITHDRAWAL_FEE_PERCENT,
+  NKFE_WITHDRAWAL_COOLDOWN_DAYS,
+  DEV_BYPASS_WITHDRAWAL_COOLDOWN
+} = require("../config/constants");
+
+function getWithdrawalErrorMessage(error) {
+  return error?.message || String(error || "Unknown payout error");
+}
+
+function formatCooldown(ms) {
+  const hours = Math.ceil(ms / (60 * 60 * 1000));
+  const days = Math.floor(hours / 24);
+  const remainingHours = hours % 24;
+
+  if (days && remainingHours) return `${days} day${days === 1 ? "" : "s"} and ${remainingHours} hour${remainingHours === 1 ? "" : "s"}`;
+  if (days) return `${days} day${days === 1 ? "" : "s"}`;
+  return `${hours} hour${hours === 1 ? "" : "s"}`;
+}
+
+async function runInTransaction(pool, callback) {
+  const client = typeof pool.connect === "function" ? await pool.connect() : pool;
+
+  try {
+    await client.query("BEGIN");
+    const result = await callback(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    if (client !== pool && typeof client.release === "function") client.release();
+  }
+}
+
 function createRaiderRepository({ pool }) {
   async function ensureRaiderProfile(discordId, wallet) {
     await pool.query(
@@ -197,12 +238,239 @@ function createRaiderRepository({ pool }) {
   }
 
 
+  async function getWithdrawalCooldown(discordId, options = {}) {
+    const cooldownDays = Number(options.cooldownDays ?? NKFE_WITHDRAWAL_COOLDOWN_DAYS);
+    const bypassCooldown = Boolean(options.bypassCooldown ?? DEV_BYPASS_WITHDRAWAL_COOLDOWN);
+    if (bypassCooldown || cooldownDays <= 0) return null;
+
+    const result = await pool.query(
+      `
+      SELECT completed_at
+      FROM raid_withdrawals
+      WHERE discord_id = $1 AND status = 'completed' AND completed_at IS NOT NULL
+      ORDER BY completed_at DESC
+      LIMIT 1
+      `,
+      [discordId]
+    );
+
+    const completedAt = result.rows[0]?.completed_at;
+    if (!completedAt) return null;
+
+    const completedTime = new Date(completedAt).getTime();
+    const cooldownMs = cooldownDays * 24 * 60 * 60 * 1000;
+    const availableAt = completedTime + cooldownMs;
+    const remainingMs = availableAt - Date.now();
+
+    if (remainingMs <= 0) return null;
+
+    return {
+      remainingMs,
+      availableAt: new Date(availableAt),
+      message: `You can withdraw again in ${formatCooldown(remainingMs)}.`
+    };
+  }
+
+  async function requestRaidWithdrawal(discordId, wallet, amount, executePayout, options = {}) {
+    if (!NKFE_SYSTEM_ENABLED || !NKFE_WITHDRAWALS_ENABLED) {
+      return { success: false, code: "withdrawals_disabled", message: "GetRight Games NKFE withdrawals are currently disabled." };
+    }
+
+    if (!NKFE_PAYOUTS_ENABLED) {
+      return { success: false, code: "payouts_disabled", message: "GetRight Games NKFE payouts are currently disabled." };
+    }
+
+    if (typeof executePayout !== "function") {
+      return { success: false, code: "payout_not_configured", message: "NKFE payout service is not configured." };
+    }
+
+    const cooldown = await getWithdrawalCooldown(discordId, options);
+    if (cooldown) {
+      return { success: false, code: "cooldown", ...cooldown };
+    }
+
+    const tokenDecimals = Number(options.tokenDecimals ?? NKFE_TOKEN_DECIMALS);
+    const feePercent = Number(options.feePercent ?? NKFE_WITHDRAWAL_FEE_PERCENT);
+    const requestedAmount = amount === undefined || amount === null ? null : Number(amount);
+
+    let pendingWithdrawal;
+
+    try {
+      pendingWithdrawal = await runInTransaction(pool, async client => {
+        const balanceResult = await client.query(
+          "SELECT payout_nkfe FROM raid_balances WHERE discord_id = $1 FOR UPDATE",
+          [discordId]
+        );
+        const available = Number(balanceResult.rows[0]?.payout_nkfe || 0);
+        const requested = requestedAmount === null ? available : requestedAmount;
+
+        if (available <= 0) {
+          return { success: false, code: "no_balance", available, message: "You do not have any withdrawable GetRight Games raid $NKFE yet." };
+        }
+
+        if (!Number.isInteger(requested) || requested <= 0) {
+          return { success: false, code: "invalid_amount", available, message: "Withdrawal amount must be a positive whole NKFE number." };
+        }
+
+        if (requested > available) {
+          return { success: false, code: "insufficient_balance", available, requested, message: `You only have ${available} NKFE available to withdraw.` };
+        }
+
+        const grossUnits = toUnits(requested, tokenDecimals);
+        const feeUnits = calculateFeeUnits(grossUnits, feePercent);
+        const netUnits = grossUnits - feeUnits;
+
+        if (netUnits <= 0n) {
+          return { success: false, code: "invalid_net_amount", available, message: "Withdrawal amount is too small after fees." };
+        }
+
+        const withdrawalResult = await client.query(
+          `
+          INSERT INTO raid_withdrawals (discord_id, wallet, amount_nkfe, gross_amount_units, fee_units, net_amount_units, status)
+          VALUES ($1, $2, $3, $4, $5, $6, 'pending')
+          RETURNING id
+          `,
+          [discordId, wallet, requested, grossUnits.toString(), feeUnits.toString(), netUnits.toString()]
+        );
+        const withdrawalId = withdrawalResult.rows[0].id;
+
+        await client.query(
+          "UPDATE raid_balances SET payout_nkfe = payout_nkfe - $2, updated_at = NOW() WHERE discord_id = $1",
+          [discordId, requested]
+        );
+
+        await client.query(
+          `
+          INSERT INTO raid_nkfe_ledger (discord_id, wallet, entry_type, amount_units, fee_units, metadata)
+          VALUES ($1, $2, 'withdrawal_debit', $3, $4, $5::jsonb)
+          `,
+          [discordId, wallet, grossUnits.toString(), feeUnits.toString(), JSON.stringify({ withdrawalId, status: "pending" })]
+        );
+
+        return {
+          success: true,
+          withdrawalId,
+          wallet,
+          requested,
+          grossUnits,
+          feeUnits,
+          netUnits,
+          grossAmount: formatTokenAmount(grossUnits, tokenDecimals),
+          feeAmount: formatTokenAmount(feeUnits, tokenDecimals),
+          netAmount: formatTokenAmount(netUnits, tokenDecimals),
+          remainingBalance: available - requested
+        };
+      });
+    } catch (error) {
+      return { success: false, code: "database_error", message: getWithdrawalErrorMessage(error) };
+    }
+
+    if (!pendingWithdrawal.success) return pendingWithdrawal;
+
+    let payoutResult;
+    let transactionId;
+
+    try {
+      payoutResult = await executePayout({
+        withdrawalId: pendingWithdrawal.withdrawalId,
+        toWallet: wallet,
+        netUnits: pendingWithdrawal.netUnits,
+        grossUnits: pendingWithdrawal.grossUnits,
+        feeUnits: pendingWithdrawal.feeUnits,
+        discordId
+      });
+      transactionId = payoutResult?.transactionId || payoutResult?.txId || null;
+    } catch (error) {
+
+      const errorMessage = getWithdrawalErrorMessage(error);
+
+      try {
+        await runInTransaction(pool, async client => {
+          await client.query(
+            "UPDATE raid_balances SET payout_nkfe = payout_nkfe + $2, updated_at = NOW() WHERE discord_id = $1",
+            [discordId, pendingWithdrawal.requested]
+          );
+
+          await client.query(
+            `
+            UPDATE raid_withdrawals
+            SET status = 'failed', payout_error = $2, processed_at = NOW()
+            WHERE id = $1
+            `,
+            [pendingWithdrawal.withdrawalId, errorMessage]
+          );
+
+          await client.query(
+            `
+            INSERT INTO raid_nkfe_ledger (discord_id, wallet, entry_type, amount_units, fee_units, metadata)
+            VALUES ($1, $2, 'withdrawal_failed_refund', $3, $4, $5::jsonb)
+            `,
+            [discordId, wallet, pendingWithdrawal.grossUnits.toString(), pendingWithdrawal.feeUnits.toString(), JSON.stringify({ withdrawalId: pendingWithdrawal.withdrawalId, error: errorMessage })]
+          );
+        });
+      } catch (refundError) {
+        return {
+          ...pendingWithdrawal,
+          success: false,
+          code: "payout_failed_refund_failed",
+          message: `Withdrawal payout failed and the automatic refund also failed. Payout error: ${errorMessage}. Refund error: ${getWithdrawalErrorMessage(refundError)}`,
+          refunded: false
+        };
+      }
+
+      return {
+        ...pendingWithdrawal,
+        success: false,
+        code: "payout_failed_refunded",
+        message: errorMessage,
+        refunded: true,
+        grossUnits: pendingWithdrawal.grossUnits.toString(),
+        feeUnits: pendingWithdrawal.feeUnits.toString(),
+        netUnits: pendingWithdrawal.netUnits.toString()
+      };
+    }
+
+    let completionWarning = null;
+    try {
+      await pool.query(
+        `
+        UPDATE raid_withdrawals
+        SET status = 'completed', transaction_id = $2, tx_id = $2, processed_at = NOW(), completed_at = NOW(), payout_error = NULL
+        WHERE id = $1
+        `,
+        [pendingWithdrawal.withdrawalId, transactionId]
+      );
+
+      await pool.query(
+        `
+        INSERT INTO raid_nkfe_ledger (discord_id, wallet, entry_type, amount_units, fee_units, metadata)
+        VALUES ($1, $2, 'withdrawal_completed', $3, $4, $5::jsonb)
+        `,
+        [discordId, wallet, pendingWithdrawal.netUnits.toString(), pendingWithdrawal.feeUnits.toString(), JSON.stringify({ withdrawalId: pendingWithdrawal.withdrawalId, transactionId })]
+      );
+    } catch (error) {
+      completionWarning = `Payout was sent, but completion logging failed: ${getWithdrawalErrorMessage(error)}`;
+    }
+
+    return {
+      ...pendingWithdrawal,
+      transactionId,
+      payoutResult,
+      completionWarning,
+      grossUnits: pendingWithdrawal.grossUnits.toString(),
+      feeUnits: pendingWithdrawal.feeUnits.toString(),
+      netUnits: pendingWithdrawal.netUnits.toString()
+    };
+  }
+
+
   return {
     ensureRaiderProfile,
     getRaiderProfile,
     setRaiderFaction,
     recordRaid,
-    revertSelfRaids
+    revertSelfRaids,
+    requestRaidWithdrawal
   };
 }
 

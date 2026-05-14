@@ -69,6 +69,7 @@ function checkCommands() {
     "rankrewards",
     "raid",
     "raidstats",
+    "raidwithdraw",
     "raidleaderboard",
     "raidfactions",
     "joinfaction",
@@ -99,7 +100,7 @@ function checkRepositories() {
     assert(typeof walletRepository[name] === "function", `walletRepository.${name} must be a function`);
   }
 
-  for (const name of ["ensureRaiderProfile", "getRaiderProfile", "setRaiderFaction", "recordRaid", "revertSelfRaids"]) {
+  for (const name of ["ensureRaiderProfile", "getRaiderProfile", "setRaiderFaction", "recordRaid", "revertSelfRaids", "requestRaidWithdrawal"]) {
     assert(typeof raiderRepository[name] === "function", `raiderRepository.${name} must be a function`);
   }
 
@@ -108,6 +109,7 @@ function checkRepositories() {
 
 function checkServices() {
   const { createWaxService } = requireFromRoot("src/services/wax.js");
+  const { toUnits, formatTokenAmount, calculateFeeUnits, executeNkfePayout } = requireFromRoot("src/services/payouts.js");
   const { createAssetService } = requireFromRoot("src/services/assets.js");
   const { ROLE_RULES, MILESTONE_ROLES, createRoleService } = requireFromRoot("src/services/roles.js");
 
@@ -115,6 +117,11 @@ function checkServices() {
   for (const name of ["getTableRows", "getRowsByOwner", "getRowsByPrimaryAccount"]) {
     assert(typeof waxService[name] === "function", `waxService.${name} must be a function`);
   }
+
+  assert(toUnits(250, 8).toString() === "25000000000", "toUnits should convert whole NKFE to token units");
+  assert(formatTokenAmount(25000000000n, 8) === "250", "formatTokenAmount should format token units");
+  assert(calculateFeeUnits(25000000000n, 0.03).toString() === "750000000", "calculateFeeUnits should floor fee units");
+  assert(typeof executeNkfePayout === "function", "executeNkfePayout must be a function");
 
   const assetService = createAssetService({ contractAccounts: [], levelFields: ["level", "tier"], waxService });
   for (const name of [
