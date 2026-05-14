@@ -31,19 +31,18 @@ function formatTokenAmount(units, decimals = NKFE_TOKEN_DECIMALS) {
   return fractionText ? `${whole}.${fractionText}` : whole.toString();
 }
 
-function formatPayoutAmount(units, sourceDecimals = NKFE_TOKEN_DECIMALS, payoutDecimals = sourceDecimals) {
+function convertUnitsForDecimals(units, sourceDecimals = NKFE_TOKEN_DECIMALS, payoutDecimals = sourceDecimals) {
   const unitValue = BigInt(units);
   const sourcePrecision = Number(sourceDecimals);
   const payoutPrecision = Number(payoutDecimals);
-  const sourceDivisor = 10n ** BigInt(sourcePrecision);
-  const whole = unitValue / sourceDivisor;
-  const remainder = unitValue % sourceDivisor;
 
-  if (!payoutPrecision) return whole.toString();
+  if (payoutPrecision === sourcePrecision) return unitValue;
+  if (payoutPrecision > sourcePrecision) return unitValue * (10n ** BigInt(payoutPrecision - sourcePrecision));
+  return unitValue / (10n ** BigInt(sourcePrecision - payoutPrecision));
+}
 
-  const payoutDivisor = 10n ** BigInt(payoutPrecision);
-  const fraction = (remainder * payoutDivisor) / sourceDivisor;
-  return `${whole}.${fraction.toString().padStart(payoutPrecision, "0")}`;
+function formatPayoutAmount(units, sourceDecimals = NKFE_TOKEN_DECIMALS, payoutDecimals = sourceDecimals) {
+  return formatTokenAmount(convertUnitsForDecimals(units, sourceDecimals, payoutDecimals), payoutDecimals);
 }
 
 function parsePercentToParts(feePercent) {
@@ -65,6 +64,28 @@ function calculateFeeUnits(grossUnits, feePercent) {
 
 function getTransactionId(result) {
   return result?.txId || result?.transactionId || result?.tx_id || result?.transaction_id || null;
+}
+
+function getPayoutErrorMessage(result, fallback) {
+  if (!result) return fallback;
+  if (typeof result === "string") return result;
+
+  const candidates = [
+    result.message,
+    result.error,
+    result.code,
+    result.reason,
+    result.error?.message,
+    result.error?.code,
+    result.error?.error,
+    result.error?.reason
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) return candidate;
+  }
+
+  return result.raw || fallback;
 }
 
 function isPrecisionMismatch(errorMessage) {
@@ -105,7 +126,7 @@ async function postPayout(payload, timeoutMs) {
 
     const result = await readJsonSafely(response);
     if (!response.ok || result?.success === false) {
-      const error = new Error(result?.message || result?.error || result?.code || result?.raw || `Payout API returned HTTP ${response.status}`);
+      const error = new Error(getPayoutErrorMessage(result, `Payout API returned HTTP ${response.status}`));
       error.status = response.status;
       error.result = result;
       throw error;
@@ -130,10 +151,11 @@ async function executeNkfePayout({ withdrawalId, toWallet, netUnits, grossUnits,
   let lastError = null;
 
   for (const decimals of decimalsToTry) {
+    const payoutAmountUnits = convertUnitsForDecimals(netUnits, NKFE_TOKEN_DECIMALS, decimals);
     const payload = {
       toWallet,
-      amountUnits: BigInt(netUnits).toString(),
-      amount: formatPayoutAmount(netUnits, NKFE_TOKEN_DECIMALS, decimals),
+      amountUnits: payoutAmountUnits.toString(),
+      amount: formatTokenAmount(payoutAmountUnits, decimals),
       tokenIdentifier: "NKFE",
       memo: `GetRight Games NKFE Withdrawal #${withdrawalId}`,
       metadata: {
@@ -141,6 +163,8 @@ async function executeNkfePayout({ withdrawalId, toWallet, netUnits, grossUnits,
         discordId,
         grossUnits: BigInt(grossUnits).toString(),
         feeUnits: BigInt(feeUnits).toString(),
+        canonicalNetUnits: BigInt(netUnits).toString(),
+        payoutAmountUnits: payoutAmountUnits.toString(),
         source: "getright_games_raid",
         payoutDecimals: decimals
       }
@@ -148,7 +172,7 @@ async function executeNkfePayout({ withdrawalId, toWallet, netUnits, grossUnits,
 
     try {
       const result = await postPayout(payload, timeoutMs);
-      return { result, transactionId: getTransactionId(result), payoutDecimals: decimals };
+      return { result, transactionId: getTransactionId(result), payoutDecimals: decimals, payoutAmountUnits: payoutAmountUnits.toString() };
     } catch (error) {
       lastError = error;
       if (!isPrecisionMismatch(error.message)) break;
@@ -162,6 +186,7 @@ module.exports = {
   toUnits,
   fromUnits,
   formatTokenAmount,
+  convertUnitsForDecimals,
   formatPayoutAmount,
   calculateFeeUnits,
   executeNkfePayout

@@ -109,7 +109,7 @@ function checkRepositories() {
 
 function checkServices() {
   const { createWaxService } = requireFromRoot("src/services/wax.js");
-  const { toUnits, formatTokenAmount, formatPayoutAmount, calculateFeeUnits, executeNkfePayout } = requireFromRoot("src/services/payouts.js");
+  const { toUnits, formatTokenAmount, convertUnitsForDecimals, formatPayoutAmount, calculateFeeUnits, executeNkfePayout } = requireFromRoot("src/services/payouts.js");
   const { createAssetService } = requireFromRoot("src/services/assets.js");
   const { ROLE_RULES, MILESTONE_ROLES, createRoleService } = requireFromRoot("src/services/roles.js");
 
@@ -120,7 +120,8 @@ function checkServices() {
 
   assert(toUnits(250, 8).toString() === "25000000000", "toUnits should convert whole NKFE to token units");
   assert(formatTokenAmount(25000000000n, 8) === "250", "formatTokenAmount should format token units");
-  assert(formatPayoutAmount(25000000000n, 8, 4) === "250.0000", "formatPayoutAmount should format fallback payout decimals from source units");
+  assert(convertUnitsForDecimals(25000000000n, 8, 4).toString() === "2500000", "convertUnitsForDecimals should convert source units to fallback payout units");
+  assert(formatPayoutAmount(25000000000n, 8, 4) === "250", "formatPayoutAmount should format fallback payout decimals from converted units");
   assert(calculateFeeUnits(25000000000n, 0.03).toString() === "750000000", "calculateFeeUnits should floor fee units");
   assert(typeof executeNkfePayout === "function", "executeNkfePayout must be a function");
 
