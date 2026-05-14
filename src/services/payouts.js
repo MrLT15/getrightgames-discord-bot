@@ -31,6 +31,21 @@ function formatTokenAmount(units, decimals = NKFE_TOKEN_DECIMALS) {
   return fractionText ? `${whole}.${fractionText}` : whole.toString();
 }
 
+function formatPayoutAmount(units, sourceDecimals = NKFE_TOKEN_DECIMALS, payoutDecimals = sourceDecimals) {
+  const unitValue = BigInt(units);
+  const sourcePrecision = Number(sourceDecimals);
+  const payoutPrecision = Number(payoutDecimals);
+  const sourceDivisor = 10n ** BigInt(sourcePrecision);
+  const whole = unitValue / sourceDivisor;
+  const remainder = unitValue % sourceDivisor;
+
+  if (!payoutPrecision) return whole.toString();
+
+  const payoutDivisor = 10n ** BigInt(payoutPrecision);
+  const fraction = (remainder * payoutDivisor) / sourceDivisor;
+  return `${whole}.${fraction.toString().padStart(payoutPrecision, "0")}`;
+}
+
 function parsePercentToParts(feePercent) {
   const text = String(feePercent ?? 0).trim();
   if (!text || Number(text) <= 0) return { numerator: 0n, denominator: 1n };
@@ -55,6 +70,8 @@ function getTransactionId(result) {
 function isPrecisionMismatch(errorMessage) {
   const message = String(errorMessage || "").toLowerCase();
   return message.includes("amount mismatch") ||
+    message.includes("amount_mismatch") ||
+    message.includes("nkfe_amount_mismatch") ||
     message.includes("precision") ||
     message.includes("decimal") ||
     message.includes("decimals");
@@ -87,8 +104,8 @@ async function postPayout(payload, timeoutMs) {
     });
 
     const result = await readJsonSafely(response);
-    if (!response.ok) {
-      const error = new Error(result?.message || result?.error || result?.raw || `Payout API returned HTTP ${response.status}`);
+    if (!response.ok || result?.success === false) {
+      const error = new Error(result?.message || result?.error || result?.code || result?.raw || `Payout API returned HTTP ${response.status}`);
       error.status = response.status;
       error.result = result;
       throw error;
@@ -116,7 +133,7 @@ async function executeNkfePayout({ withdrawalId, toWallet, netUnits, grossUnits,
     const payload = {
       toWallet,
       amountUnits: BigInt(netUnits).toString(),
-      amount: formatTokenAmount(netUnits, decimals),
+      amount: formatPayoutAmount(netUnits, NKFE_TOKEN_DECIMALS, decimals),
       tokenIdentifier: "NKFE",
       memo: `GetRight Games NKFE Withdrawal #${withdrawalId}`,
       metadata: {
@@ -124,7 +141,8 @@ async function executeNkfePayout({ withdrawalId, toWallet, netUnits, grossUnits,
         discordId,
         grossUnits: BigInt(grossUnits).toString(),
         feeUnits: BigInt(feeUnits).toString(),
-        source: "getright_games_raid"
+        source: "getright_games_raid",
+        payoutDecimals: decimals
       }
     };
 
@@ -144,6 +162,7 @@ module.exports = {
   toUnits,
   fromUnits,
   formatTokenAmount,
+  formatPayoutAmount,
   calculateFeeUnits,
   executeNkfePayout
 };
